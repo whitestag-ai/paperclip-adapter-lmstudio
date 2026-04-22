@@ -123,8 +123,8 @@ Contributions welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Acknowledgments
 
-Built by Walter Schoenenbroecher (WHITESTAG) with AI pair-programming assistance from [Claude](https://www.anthropic.com/claude) (Anthropic).
+Built by Walter Schoenenbroecher ([WHITESTAG.AI](https://whitestag.ai), <ws@whitestag.ai>) with AI pair-programming assistance from [Claude](https://www.anthropic.com/claude) (Anthropic).
 
 ## License
 
-[MIT](LICENSE) © Walter Schoenenbroecher / WHITESTAG
+[MIT](LICENSE) © Walter Schoenenbroecher / WHITESTAG.AI

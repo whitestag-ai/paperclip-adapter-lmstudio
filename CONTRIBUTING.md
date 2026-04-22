@@ -41,6 +41,8 @@ Please include:
 - Relevant adapter config (redact hostnames if sensitive)
 - Full error/log output and a minimal reproduction if possible
 
+For private/security reports, contact <ws@whitestag.ai>.
+
 ## Acknowledgments
 
 This project is developed with AI pair-programming assistance from [Claude](https://www.anthropic.com/claude) (Anthropic). Commits produced with Claude's assistance include a `Co-Authored-By: Claude` trailer in the commit message — contributors are encouraged to follow the same convention when applicable.

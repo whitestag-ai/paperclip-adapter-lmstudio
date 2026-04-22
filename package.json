@@ -4,7 +4,7 @@
   "description": "Paperclip adapter for LM Studio (OpenAI-compatible local LLMs) with full tool-use support",
   "type": "module",
   "license": "MIT",
-  "author": "Walter Schoenenbroecher (WHITESTAG)",
+  "author": "Walter Schoenenbroecher <ws@whitestag.ai> (WHITESTAG.AI)",
   "homepage": "https://github.com/whitestag/paperclip-adapter-lmstudio#readme",
   "repository": {
     "type": "git",
