@@ -5,7 +5,7 @@ Thanks for your interest in contributing!
 ## Getting started
 
 ```bash
-git clone https://github.com/whitestag/paperclip-adapter-lmstudio.git
+git clone https://github.com/whitestag-ai/paperclip-adapter-lmstudio.git
 cd paperclip-adapter-lmstudio
 pnpm install
 pnpm build

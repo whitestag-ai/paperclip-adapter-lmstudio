@@ -5,13 +5,13 @@
   "type": "module",
   "license": "MIT",
   "author": "Walter Schoenenbroecher <ws@whitestag.ai> (WHITESTAG.AI)",
-  "homepage": "https://github.com/whitestag/paperclip-adapter-lmstudio#readme",
+  "homepage": "https://github.com/whitestag-ai/paperclip-adapter-lmstudio#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/whitestag/paperclip-adapter-lmstudio.git"
+    "url": "git+https://github.com/whitestag-ai/paperclip-adapter-lmstudio.git"
   },
   "bugs": {
-    "url": "https://github.com/whitestag/paperclip-adapter-lmstudio/issues"
+    "url": "https://github.com/whitestag-ai/paperclip-adapter-lmstudio/issues"
   },
   "keywords": [
     "paperclip",

@@ -1,6 +1,6 @@
 # paperclip-adapter-lmstudio
 
-[![CI](https://github.com/whitestag/paperclip-adapter-lmstudio/actions/workflows/ci.yml/badge.svg)](https://github.com/whitestag/paperclip-adapter-lmstudio/actions/workflows/ci.yml)
+[![CI](https://github.com/whitestag-ai/paperclip-adapter-lmstudio/actions/workflows/ci.yml/badge.svg)](https://github.com/whitestag-ai/paperclip-adapter-lmstudio/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A [Paperclip](https://github.com/paperclipai/paperclip) adapter for [LM Studio](https://lmstudio.ai/) — run Paperclip agents against OpenAI-compatible local LLMs with full tool-use support.
@@ -26,7 +26,7 @@ Connects Paperclip agents to local LLMs served by LM Studio and implements a com
 ## Installation
 
 ```bash
-git clone https://github.com/whitestag/paperclip-adapter-lmstudio.git
+git clone https://github.com/whitestag-ai/paperclip-adapter-lmstudio.git
 cd paperclip-adapter-lmstudio
 pnpm install
 pnpm build
