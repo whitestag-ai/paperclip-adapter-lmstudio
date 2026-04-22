@@ -121,6 +121,10 @@ Models without function-calling support tend to produce garbled output. Verify w
 
 Contributions welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
+## Acknowledgments
+
+Built by Walter Schoenenbroecher (WHITESTAG) with AI pair-programming assistance from [Claude](https://www.anthropic.com/claude) (Anthropic).
+
 ## License
 
 [MIT](LICENSE) © Walter Schoenenbroecher / WHITESTAG

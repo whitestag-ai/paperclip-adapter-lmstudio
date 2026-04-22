@@ -41,6 +41,10 @@ Please include:
 - Relevant adapter config (redact hostnames if sensitive)
 - Full error/log output and a minimal reproduction if possible
 
+## Acknowledgments
+
+This project is developed with AI pair-programming assistance from [Claude](https://www.anthropic.com/claude) (Anthropic). Commits produced with Claude's assistance include a `Co-Authored-By: Claude` trailer in the commit message — contributors are encouraged to follow the same convention when applicable.
+
 ## License
 
 By contributing, you agree that your contributions will be licensed under the [MIT License](LICENSE).
