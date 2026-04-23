@@ -84,7 +84,7 @@ function buildSystemPrompt(agent: ExecutionContext["agent"], context: Record<str
     "## Final answer format",
     "",
     "After `paperclip_update_issue` succeeds, return ONE short sentence confirming the status update, e.g.:",
-    '"Task WHI-14 marked as done. File whitestag-agenten.md created with 6 C-level role descriptions."',
+    '"Task PROJ-42 marked as done. Implemented the requested change."',
   ];
 
   const instructions = asString(context.agentInstructions, "");
