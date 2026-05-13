@@ -237,6 +237,81 @@ describe("execute (post-run guard)", () => {
     expect(body.comment).toContain("post-run guard");
   });
 
+  it("does NOT trigger guard when LLM mixes identifier and UUID (WHI-416 regression)", async () => {
+    // Reproduces the WHI-416 case: LLM checks out by identifier ("WHI-416")
+    // but updates by UUID. Without canonical-id normalization the guard's
+    // set difference wrongly thinks the issue is unclosed and re-flips it
+    // from done back to blocked — which fires misleading watch notifications.
+    const uuid = "c1135f8d-b64d-414b-9e9a-b1583f1b661a";
+    const identifier = "WHI-416";
+
+    const streamBody = 'data: {"choices":[{"delta":{"content":"Done"}}]}\n\ndata: [DONE]\n\n';
+    const mockStream = new ReadableStream({
+      start(c) { c.enqueue(new TextEncoder().encode(streamBody)); c.close(); },
+    });
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ data: [{ id: "m" }] }),
+      })
+      // LLM turn 1: checkout by identifier
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          choices: [{
+            message: {
+              role: "assistant",
+              content: null,
+              tool_calls: [{
+                id: "call_1",
+                type: "function",
+                function: { name: "paperclip_checkout_issue", arguments: `{"issueId":"${identifier}"}` },
+              }],
+            },
+          }],
+        }),
+      })
+      // Tool execution: API resolves identifier and returns the issue with its UUID
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: uuid, identifier, status: "in_progress" }) })
+      // LLM turn 2: update to done by UUID
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          choices: [{
+            message: {
+              role: "assistant",
+              content: null,
+              tool_calls: [{
+                id: "call_2",
+                type: "function",
+                function: { name: "paperclip_update_issue", arguments: `{"issueId":"${uuid}","status":"done","comment":"ok"}` },
+              }],
+            },
+          }],
+        }),
+      })
+      // Tool execution: update succeeds, response carries the same canonical id
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: uuid, identifier, status: "done" }) })
+      // LLM turn 3: final text
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { role: "assistant", content: "Task marked as done" } }],
+        }),
+      })
+      .mockResolvedValueOnce({ ok: true, body: mockStream });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await execute(makeCtx() as any);
+
+    expect(result.exitCode).toBe(0);
+    // 7 fetch calls: 1 probe + 3 LLM turns + 2 tool calls + 1 stream — and crucially NO 8th call from the guard.
+    expect(fetchMock).toHaveBeenCalledTimes(7);
+  });
+
   it("does NOT trigger guard when LLM properly calls paperclip_update_issue", async () => {
     const streamBody = 'data: {"choices":[{"delta":{"content":"Done"}}]}\n\ndata: [DONE]\n\n';
     const mockStream = new ReadableStream({

@@ -158,6 +158,24 @@ async function logEvent(
   await onLog("stdout", JSON.stringify(event) + "\n");
 }
 
+/**
+ * Resolve the canonical issue UUID from a paperclip_{checkout,update}_issue
+ * tool result, falling back to args.issueId when the result is unparseable.
+ * Without this normalization the post-run guard mistakes "WHI-416" and the
+ * underlying UUID for two different issues.
+ */
+function canonicalIssueIdFromResult(content: string, args: Record<string, unknown>): string {
+  try {
+    const parsed = JSON.parse(content);
+    if (parsed && typeof parsed === "object" && typeof (parsed as { id?: unknown }).id === "string") {
+      return (parsed as { id: string }).id;
+    }
+  } catch {
+    // fall through to args
+  }
+  return typeof args.issueId === "string" ? args.issueId : "";
+}
+
 interface PostRunGuardParams {
   checkedOutIssues: Set<string>;
   updatedIssues: Set<string>;
@@ -490,16 +508,20 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
         allowedWriteRoots,
       });
 
-      // Track checkout and terminal-status updates for the post-run guard
+      // Track checkout and terminal-status updates for the post-run guard.
+      // The LLM may pass either the UUID or the human identifier (e.g. WHI-416)
+      // as issueId, so always resolve to the canonical UUID from the tool's
+      // result body. Otherwise a mismatch between checkout-by-identifier and
+      // update-by-UUID would make the guard wrongly re-flip a closed issue.
       if (!result.isError) {
         if (toolCall.function.name === "paperclip_checkout_issue") {
-          const issueId = typeof args.issueId === "string" ? args.issueId : "";
+          const issueId = canonicalIssueIdFromResult(result.content, args);
           if (issueId) checkedOutIssues.add(issueId);
         } else if (toolCall.function.name === "paperclip_update_issue") {
-          const issueId = typeof args.issueId === "string" ? args.issueId : "";
           const status = typeof args.status === "string" ? args.status : "";
-          if (issueId && TERMINAL_STATUSES.has(status)) {
-            updatedIssues.add(issueId);
+          if (TERMINAL_STATUSES.has(status)) {
+            const issueId = canonicalIssueIdFromResult(result.content, args);
+            if (issueId) updatedIssues.add(issueId);
           }
         }
       }
