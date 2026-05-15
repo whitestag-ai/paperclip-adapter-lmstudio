@@ -237,6 +237,85 @@ describe("execute (post-run guard)", () => {
     expect(body.comment).toContain("post-run guard");
   });
 
+  it("auto-closes as DONE when LLM final message has issue identifier and completion phrase", async () => {
+    // MLX models often state completion in plain text but forget to call
+    // paperclip_update_issue. When the final text unambiguously says
+    // "Task WHI-X abgeschlossen" the guard should infer status=done
+    // instead of the safer-but-spammier blocked.
+    const streamBody = 'data: {"choices":[{"delta":{"content":"Task WHI-1 abgeschlossen"}}]}\n\ndata: [DONE]\n\n';
+    const mockStream = new ReadableStream({
+      start(c) { c.enqueue(new TextEncoder().encode(streamBody)); c.close(); },
+    });
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ data: [{ id: "m" }] }),
+      })
+      // LLM turn 1: checkout
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          choices: [{
+            message: {
+              role: "assistant",
+              content: null,
+              tool_calls: [{
+                id: "call_1",
+                type: "function",
+                function: { name: "paperclip_checkout_issue", arguments: '{"issueId":"issue-1"}' },
+              }],
+            },
+          }],
+        }),
+      })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true }) })
+      // LLM turn 2: just a comment, no status update
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          choices: [{
+            message: {
+              role: "assistant",
+              content: null,
+              tool_calls: [{
+                id: "call_2",
+                type: "function",
+                function: { name: "paperclip_add_comment", arguments: '{"issueId":"issue-1","body":"did the work"}' },
+              }],
+            },
+          }],
+        }),
+      })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true }) })
+      // LLM turn 3: final text answer
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { role: "assistant", content: "Task WHI-1 abgeschlossen" } }],
+        }),
+      })
+      // Streaming final answer
+      .mockResolvedValueOnce({ ok: true, body: mockStream })
+      // POST-RUN GUARD: auto-call paperclip_update_issue with status=done
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true }) });
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    const ctx = makeCtx();
+    const result = await execute(ctx as any);
+
+    expect(result.exitCode).toBe(0);
+
+    const lastCall = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
+    expect(lastCall[0]).toContain("/api/issues/issue-1");
+    expect(lastCall[1].method).toBe("PATCH");
+    const body = JSON.parse(lastCall[1].body);
+    expect(body.status).toBe("done");
+    expect(body.comment).toContain("inferred from the final message");
+  });
+
   it("does NOT trigger guard when LLM mixes identifier and UUID (WHI-416 regression)", async () => {
     // Reproduces the WHI-416 case: LLM checks out by identifier ("WHI-416")
     // but updates by UUID. Without canonical-id normalization the guard's

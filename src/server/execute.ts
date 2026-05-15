@@ -10,6 +10,7 @@ import { resolvePrimaryOrFallback, type Endpoint } from "./endpoint-resolver.js"
 import { dispatchTool } from "./tool-executor.js";
 import { PAPERCLIP_TOOLS } from "./tools.js";
 import { executePaperclipTool, type PaperclipContext } from "./paperclip-tools.js";
+import { inferTerminalStatusFromFinalMessage } from "./guard-inference.js";
 
 interface ExecutionContext {
   runId: string;
@@ -198,26 +199,39 @@ async function runPostRunGuard(params: PostRunGuardParams): Promise<void> {
   const unclosed = Array.from(checkedOutIssues).filter((id) => !updatedIssues.has(id));
   if (unclosed.length === 0) return;
 
+  const inferred = inferTerminalStatusFromFinalMessage(finalSummary);
+
   for (const issueId of unclosed) {
-    const comment = [
-      "**Adapter post-run guard triggered:**",
-      "",
-      "The LLM finished its heartbeat without calling `paperclip_update_issue` with a terminal status.",
-      "This adapter has auto-closed the issue as `blocked` so it does not stay stuck in `in_progress`.",
-      "",
-      "Please review the preceding comments and tool activity to decide whether the work is actually complete.",
-      "",
-      finalSummary ? `**LLM final message:** ${finalSummary.slice(0, 500)}` : "",
-    ].filter(Boolean).join("\n");
+    const status = inferred ?? "blocked";
+    const comment = inferred === "done"
+      ? [
+          "**Adapter post-run guard auto-closed as `done`:**",
+          "",
+          "The LLM finished its heartbeat without calling `paperclip_update_issue`, but its final message clearly stated completion. Status was inferred from the final message.",
+          "",
+          "Review the preceding tool activity if this looks wrong.",
+          "",
+          `**LLM final message:** ${finalSummary.slice(0, 500)}`,
+        ].join("\n")
+      : [
+          "**Adapter post-run guard triggered:**",
+          "",
+          "The LLM finished its heartbeat without calling `paperclip_update_issue` with a terminal status.",
+          "This adapter has auto-closed the issue as `blocked` so it does not stay stuck in `in_progress`.",
+          "",
+          "Please review the preceding comments and tool activity to decide whether the work is actually complete.",
+          "",
+          finalSummary ? `**LLM final message:** ${finalSummary.slice(0, 500)}` : "",
+        ].filter(Boolean).join("\n");
 
     await logEvent(onLog, {
       kind: "system",
-      text: `Post-run guard: auto-closing ${issueId} as blocked (LLM did not update status).`,
+      text: `Post-run guard: auto-closing ${issueId} as ${status} (LLM did not call paperclip_update_issue).`,
     });
 
     const result = await executePaperclipTool(
       "paperclip_update_issue",
-      { issueId, status: "blocked", comment },
+      { issueId, status, comment },
       paperclipCtx,
     );
 
@@ -237,7 +251,12 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
   const primaryModel = asString(config.model, "") || asString(config.defaultModel, "");
   const fallbackUrl = asString(config.fallbackUrl, "");
   const fallbackModel = asString(config.fallbackModel, "");
-  const probeTimeoutMs = asNumber(config.probeTimeoutMs, 2000);
+  // 8s default: covers cold-start of large MLX models on remote LM Studio
+  // servers (RTX-class GPUs need 3–6s to warm). Combined with the one retry
+  // in resolvePrimaryOrFallback, worst-case primary probe is ~16s + backoff
+  // before falling back — accepted trade-off to avoid spurious failovers.
+  const probeTimeoutMs = asNumber(config.probeTimeoutMs, 8000);
+  const probeRetryBackoffMs = asNumber(config.probeRetryBackoffMs, 500);
   const timeoutMs = asNumber(config.timeoutMs, 120000);
   const maxIterations = asNumber(config.maxIterations, 25);
   const maxRunSeconds = asNumber(config.maxRunSeconds, asNumber(config.timeoutSec, 300));
@@ -287,6 +306,7 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
     fallbackUrl,
     fallbackModel,
     probeTimeoutMs,
+    retryBackoffMs: probeRetryBackoffMs,
   });
 
   if (!resolve.ok) {

@@ -18,6 +18,7 @@ function makeCtx(overrides: Record<string, unknown> = {}, context: Record<string
       fallbackUrl: "http://fallback:1234",
       fallbackModel: "small",
       probeTimeoutMs: 200,
+      probeRetryBackoffMs: 0,
       timeoutMs: 5000,
       maxIterations: 3,
       ...overrides,
@@ -94,6 +95,8 @@ describe("execute — fallback behavior", () => {
     const fetchMock = vi.fn()
       // Primary probe fails
       .mockRejectedValueOnce(connRefused())
+      // Primary retry also fails
+      .mockRejectedValueOnce(connRefused())
       // Fallback probe ok
       .mockResolvedValueOnce(okModelsResponse())
       // LLM turn 1 on fallback: final text
@@ -120,7 +123,9 @@ describe("execute — fallback behavior", () => {
   });
 
   it("fails cleanly when primary probe fails and no fallback configured", async () => {
-    const fetchMock = vi.fn().mockRejectedValueOnce(connRefused());
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(connRefused())
+      .mockRejectedValueOnce(connRefused());
     vi.stubGlobal("fetch", fetchMock);
 
     const ctx = makeCtx({ fallbackUrl: "" });
@@ -196,6 +201,8 @@ describe("execute — fallback behavior", () => {
     const fetchMock = vi.fn()
       // Primary probe fails
       .mockRejectedValueOnce(connRefused())
+      // Primary retry also fails
+      .mockRejectedValueOnce(connRefused())
       // Fallback probe ok
       .mockResolvedValueOnce(okModelsResponse())
       // LLM turn 1 on fallback: tool call
@@ -242,16 +249,18 @@ describe("execute — fallback behavior", () => {
     }).length;
     expect(metaCount).toBe(1);
 
-    // Every LM-Studio call (probe of primary failed, everything else) went to fallback
-    const lmStudioCalls = fetchMock.mock.calls
+    // Every non-probe LM-Studio call went to fallback (probes hit /v1/models;
+    // chat completions hit /v1/chat/completions).
+    const nonProbePrimaryCalls = fetchMock.mock.calls
       .map(([u]) => String(u))
-      .filter((u) => u.includes(":1234/"));
-    const primaryAfterProbe = lmStudioCalls.slice(1).filter((u) => u.startsWith("http://primary"));
-    expect(primaryAfterProbe.length).toBe(0);
+      .filter((u) => u.includes(":1234/") && !u.endsWith("/v1/models"))
+      .filter((u) => u.startsWith("http://primary"));
+    expect(nonProbePrimaryCalls.length).toBe(0);
   });
 
   it("uses primaryModel name on fallback when fallbackModel is empty", async () => {
     const fetchMock = vi.fn()
+      .mockRejectedValueOnce(connRefused())
       .mockRejectedValueOnce(connRefused())
       .mockResolvedValueOnce(okModelsResponse())
       .mockResolvedValueOnce({
