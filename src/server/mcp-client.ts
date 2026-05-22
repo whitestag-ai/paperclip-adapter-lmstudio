@@ -36,6 +36,15 @@ interface Connected {
   tools: ToolDefinition[];
 }
 
+/** Merge process.env with the configured env, dropping undefined values. */
+function sanitizeEnv(env?: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries({ ...process.env, ...(env ?? {}) })) {
+    if (v !== undefined) out[k] = v;
+  }
+  return out;
+}
+
 export class McpRegistry {
   private servers = new Map<string, Connected>();
 
@@ -45,11 +54,12 @@ export class McpRegistry {
   ): Promise<McpRegistry> {
     const reg = new McpRegistry();
     for (const [name, spec] of Object.entries(config ?? {})) {
+      let transport: StdioClientTransport | undefined;
       try {
-        const transport = new StdioClientTransport({
+        transport = new StdioClientTransport({
           command: spec.command,
           args: spec.args ?? [],
-          env: { ...process.env, ...(spec.env ?? {}) } as Record<string, string>,
+          env: sanitizeEnv(spec.env),
         });
         const client = new Client(
           { name: "paperclip-adapter-lmstudio", version: "1.0.0" },
@@ -73,6 +83,14 @@ export class McpRegistry {
         reg.servers.set(name, { client, tools });
         await log("stdout", `[mcp] connected "${name}" (${tools.length} tools)\n`);
       } catch (err) {
+        // Close the transport so a partial connect doesn't orphan the child process.
+        if (transport) {
+          try {
+            await transport.close();
+          } catch {
+            /* best-effort */
+          }
+        }
         const msg = err instanceof Error ? err.message : String(err);
         await log("stderr", `[mcp] failed to connect "${name}": ${msg}\n`);
       }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { encodeMcpToolName, decodeMcpToolName } from "../src/server/mcp-client.js";
+import { encodeMcpToolName, decodeMcpToolName, McpRegistry } from "../src/server/mcp-client.js";
 
 describe("mcp tool name encoding", () => {
   it("encodes server + tool into a mcp__ prefixed name", () => {
@@ -18,5 +18,25 @@ describe("mcp tool name encoding", () => {
   });
   it("returns null for non-mcp names", () => {
     expect(decodeMcpToolName("paperclip_get_inbox")).toBeNull();
+  });
+});
+
+describe("McpRegistry with no connected servers", () => {
+  it("has() is false for an unconnected mcp tool", () => {
+    const reg = new McpRegistry();
+    expect(reg.has("mcp__paperclip-health__get_daily")).toBe(false);
+  });
+
+  it("call() returns an error result instead of throwing", async () => {
+    const reg = new McpRegistry();
+    const result = await reg.call("mcp__paperclip-health__get_daily", {}, 1000);
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("not connected");
+  });
+
+  it("call() rejects a non-mcp name", async () => {
+    const reg = new McpRegistry();
+    const result = await reg.call("paperclip_get_inbox", {}, 1000);
+    expect(result.isError).toBe(true);
   });
 });
