@@ -54,6 +54,31 @@ function asNumber(val: unknown, fallback: number): number {
   return typeof val === "number" ? val : fallback;
 }
 
+/**
+ * Coerce the `mcpServers` config value into a server map. Accepts either an
+ * object (set via API) or a JSON string (entered through the "text" config
+ * field). Anything malformed yields an empty map so a bad value cannot crash
+ * the run — MCP routing simply stays disabled.
+ */
+export function parseMcpServersConfig(
+  val: unknown,
+): Record<string, McpServerConfig> {
+  let candidate: unknown = val;
+  if (typeof val === "string") {
+    const trimmed = val.trim();
+    if (!trimmed) return {};
+    try {
+      candidate = JSON.parse(trimmed);
+    } catch {
+      return {};
+    }
+  }
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+    return {};
+  }
+  return candidate as Record<string, McpServerConfig>;
+}
+
 function buildSystemPrompt(
   agent: ExecutionContext["agent"],
   context: Record<string, unknown>,
@@ -288,8 +313,9 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
     .map((p) => p.trim())
     .filter(Boolean);
 
-  const mcpServersConfig =
-    (config.mcpServers as Record<string, McpServerConfig> | undefined) ?? {};
+  // The config-schema field is type "text", so a UI-entered value may arrive as
+  // a JSON string; values set via the API arrive as an object. Accept both.
+  const mcpServersConfig = parseMcpServersConfig(config.mcpServers);
 
   if (!primaryModel) {
     return {
