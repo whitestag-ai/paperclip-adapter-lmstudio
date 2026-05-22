@@ -89,7 +89,8 @@ export class McpRegistry {
   }
 
   has(name: string): boolean {
-    return decodeMcpToolName(name) !== null;
+    const decoded = decodeMcpToolName(name);
+    return decoded !== null && this.servers.has(decoded.server);
   }
 
   async call(
