@@ -94,7 +94,7 @@ function buildSystemPrompt(
     "- Shell & Git: execute commands, git operations (shell_exec, git_*)",
     ...(mcpToolNames.length > 0
       ? [
-          `- Domain tools (MCP): prefer these for domain data over shell/grep — ${mcpToolNames.join(", ")}`,
+          `- Domain tools (MCP): the AUTHORITATIVE source for the user's real data — ${mcpToolNames.join(", ")}`,
         ]
       : []),
     "",
@@ -104,7 +104,9 @@ function buildSystemPrompt(
     "",
     "1. **Checkout the issue** — call `paperclip_checkout_issue` with the issueId.",
     "2. **Understand the task** — call `paperclip_get_issue_context` to see the full description and history.",
-    "3. **Do the work** — use filesystem/shell/git tools as needed.",
+    mcpToolNames.length > 0
+      ? "3. **Do the work** — for ANY information about the user (health, nutrition, sleep, training, vitals, etc.) you MUST call the domain (MCP) tools listed above. They are the only source of that data. Do NOT use fs_* or shell to search the filesystem for the user's data — it is not there. Use filesystem/shell/git only when the task is explicitly about code or files."
+      : "3. **Do the work** — use filesystem/shell/git tools as needed.",
     "4. **CRITICAL: Close the loop** — call `paperclip_update_issue` with EXACTLY these parameters:",
     '   - `status: "done"` (or `"blocked"` if you cannot complete, `"in_review"` if awaiting human approval)',
     "   - `comment`: a short markdown summary of what you did (what was accomplished, any files created, any blockers)",
@@ -116,6 +118,11 @@ function buildSystemPrompt(
     '- Do not give a final text reply until AFTER `paperclip_update_issue` has been called successfully.',
     "- If a tool call returned an error, address the error (retry with corrected parameters or mark the issue `blocked` with an explanation). Do not silently ignore errors.",
     "- If you are unsure of the issueId, call `paperclip_get_inbox` first to find your assigned tasks.",
+    ...(mcpToolNames.length > 0
+      ? [
+          "- NEVER answer a question about the user's data from memory, assumption, or filesystem guesses. Call the relevant domain (MCP) tool and base your answer on its result. If no MCP tool covers the question, say so explicitly in the issue.",
+        ]
+      : []),
     "",
     "## Final answer format",
     "",
