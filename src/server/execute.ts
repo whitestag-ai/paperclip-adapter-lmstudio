@@ -9,6 +9,7 @@ import {
 import { resolvePrimaryOrFallback, type Endpoint } from "./endpoint-resolver.js";
 import { dispatchTool } from "./tool-executor.js";
 import { PAPERCLIP_TOOLS } from "./tools.js";
+import { McpRegistry, type McpServerConfig } from "./mcp-client.js";
 import { executePaperclipTool, type PaperclipContext } from "./paperclip-tools.js";
 import { inferTerminalStatusFromFinalMessage } from "./guard-inference.js";
 
@@ -53,7 +54,11 @@ function asNumber(val: unknown, fallback: number): number {
   return typeof val === "number" ? val : fallback;
 }
 
-function buildSystemPrompt(agent: ExecutionContext["agent"], context: Record<string, unknown>): string {
+function buildSystemPrompt(
+  agent: ExecutionContext["agent"],
+  context: Record<string, unknown>,
+  mcpToolNames: string[] = [],
+): string {
   const parts: string[] = [
     `You are ${agent.name}, a Paperclip AI agent.`,
     `Your agent ID is ${agent.id}. Your company ID is ${agent.companyId}.`,
@@ -62,6 +67,11 @@ function buildSystemPrompt(agent: ExecutionContext["agent"], context: Record<str
     "- Paperclip API: manage issues, comments, subtasks (paperclip_*)",
     "- File System: read, write, search files (fs_*)",
     "- Shell & Git: execute commands, git operations (shell_exec, git_*)",
+    ...(mcpToolNames.length > 0
+      ? [
+          `- Domain tools (MCP): prefer these for domain data over shell/grep — ${mcpToolNames.join(", ")}`,
+        ]
+      : []),
     "",
     "## MANDATORY Heartbeat Procedure",
     "",
@@ -278,6 +288,9 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
     .map((p) => p.trim())
     .filter(Boolean);
 
+  const mcpServersConfig =
+    (config.mcpServers as Record<string, McpServerConfig> | undefined) ?? {};
+
   if (!primaryModel) {
     return {
       exitCode: 1,
@@ -332,6 +345,10 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
     });
   }
 
+  const mcpRegistry = await McpRegistry.connect(mcpServersConfig, ctx.onLog);
+  const mcpTools = mcpRegistry.toolDefinitions();
+  const tools = mcpTools.length > 0 ? [...PAPERCLIP_TOOLS, ...mcpTools] : PAPERCLIP_TOOLS;
+
   // Try a failover on a typed LlmClientError. Returns true if we switched,
   // false if no fallback is available or error kind isn't a failover trigger.
   async function maybeSwitchToFallback(err: unknown, context: string): Promise<boolean> {
@@ -366,7 +383,7 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
     : ctx.context;
 
   const messages: ChatMessage[] = [
-    { role: "system", content: buildSystemPrompt(ctx.agent, systemPromptContext) },
+    { role: "system", content: buildSystemPrompt(ctx.agent, systemPromptContext, mcpRegistry.toolNames()) },
     { role: "user", content: buildUserPrompt(ctx.context) },
   ];
 
@@ -379,6 +396,7 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
   const updatedIssues = new Set<string>();
   const TERMINAL_STATUSES = new Set(["done", "blocked", "cancelled", "in_review"]);
 
+  try {
   for (let iteration = 0; iteration < maxIterations; iteration++) {
     if (Date.now() > runDeadlineMs) {
       await runPostRunGuard({
@@ -407,7 +425,7 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
         url: currentEndpoint.url,
         model: currentEndpoint.model,
         messages,
-        tools: PAPERCLIP_TOOLS,
+        tools,
         timeoutMs: callTimeoutMs(),
       });
     } catch (err) {
@@ -422,7 +440,7 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
             url: currentEndpoint.url,
             model: currentEndpoint.model,
             messages,
-            tools: PAPERCLIP_TOOLS,
+            tools,
             timeoutMs: retryTimeoutMs,
           });
         } catch (err2) {
@@ -526,6 +544,8 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
         cwd,
         paperclipCtx,
         allowedWriteRoots,
+        mcpRegistry,
+        mcpCallTimeoutMs: Math.max(1000, Math.min(30000, remainingRunMs() || 30000)),
       });
 
       // Track checkout and terminal-status updates for the post-run guard.
@@ -573,4 +593,7 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
     provider: "lmstudio",
     usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens },
   };
+  } finally {
+    await mcpRegistry.close();
+  }
 }
