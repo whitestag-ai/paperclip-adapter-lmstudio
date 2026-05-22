@@ -1,5 +1,27 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { execute } from "../src/server/execute.js";
+import { execute, parseMcpServersConfig } from "../src/server/execute.js";
+
+describe("parseMcpServersConfig", () => {
+  const server = { command: "/bin/srv", args: ["--x"] };
+
+  it("passes through an object value", () => {
+    expect(parseMcpServersConfig({ health: server })).toEqual({ health: server });
+  });
+
+  it("parses a JSON string value", () => {
+    expect(parseMcpServersConfig(JSON.stringify({ health: server }))).toEqual({
+      health: server,
+    });
+  });
+
+  it("returns {} for undefined, empty string, invalid JSON, arrays and non-objects", () => {
+    expect(parseMcpServersConfig(undefined)).toEqual({});
+    expect(parseMcpServersConfig("")).toEqual({});
+    expect(parseMcpServersConfig("{not json")).toEqual({});
+    expect(parseMcpServersConfig("[1,2]")).toEqual({});
+    expect(parseMcpServersConfig(42)).toEqual({});
+  });
+});
 
 function makeCtx(overrides: Record<string, unknown> = {}, context: Record<string, unknown> = {}) {
   const logs: string[] = [];

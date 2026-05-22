@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { dispatchTool } from "../src/server/tool-executor.js";
+import { McpRegistry } from "../src/server/mcp-client.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -56,5 +57,35 @@ describe("dispatchTool", () => {
     });
     expect(result.isError).toBe(true);
     expect(result.content).toContain("Unknown tool");
+  });
+});
+
+describe("dispatchTool MCP routing", () => {
+  it("routes mcp__ tools to the registry", async () => {
+    const registry = { has: () => true, call: vi.fn().mockResolvedValue({ content: "ok", isError: false }) } as unknown as McpRegistry;
+    const result = await dispatchTool({
+      name: "mcp__paperclip-health__get_daily",
+      args: { date: "2026-05-22" },
+      cwd: "/tmp",
+      paperclipCtx: {} as never,
+      mcpRegistry: registry,
+      mcpCallTimeoutMs: 30000,
+    });
+    expect(result).toEqual({ content: "ok", isError: false });
+    expect(registry.call).toHaveBeenCalledWith(
+      "mcp__paperclip-health__get_daily",
+      { date: "2026-05-22" },
+      30000,
+    );
+  });
+
+  it("returns unknown-tool error for mcp__ names when no registry given", async () => {
+    const result = await dispatchTool({
+      name: "mcp__x__y",
+      args: {},
+      cwd: "/tmp",
+      paperclipCtx: {} as never,
+    });
+    expect(result.isError).toBe(true);
   });
 });
