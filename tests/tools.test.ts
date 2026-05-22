@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import { PAPERCLIP_TOOLS } from "../src/server/tools.js";
 
 describe("PAPERCLIP_TOOLS", () => {
-  it("defines 18 tools across 3 categories", () => {
-    expect(PAPERCLIP_TOOLS.length).toBe(18);
+  it("defines 20 tools across 3 categories", () => {
+    expect(PAPERCLIP_TOOLS.length).toBe(20);
   });
 
   it("has all tools with OpenAI function calling shape", () => {
@@ -15,7 +15,7 @@ describe("PAPERCLIP_TOOLS", () => {
     }
   });
 
-  it("includes all 8 Paperclip API tools", () => {
+  it("includes all 10 Paperclip API tools", () => {
     const names = PAPERCLIP_TOOLS.map((t) => t.function.name);
     expect(names).toContain("paperclip_get_identity");
     expect(names).toContain("paperclip_get_inbox");
@@ -25,6 +25,8 @@ describe("PAPERCLIP_TOOLS", () => {
     expect(names).toContain("paperclip_get_issue_context");
     expect(names).toContain("paperclip_get_comments");
     expect(names).toContain("paperclip_create_subtask");
+    expect(names).toContain("paperclip_list_documents");
+    expect(names).toContain("paperclip_put_document");
   });
 
   it("includes all 5 filesystem tools", () => {

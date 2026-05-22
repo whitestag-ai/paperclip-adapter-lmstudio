@@ -143,6 +143,57 @@ export const PAPERCLIP_TOOLS: ToolDefinition[] = [
   {
     type: "function",
     function: {
+      name: "paperclip_list_documents",
+      description:
+        "List structured issue documents for a task (each entry has key, title, latestRevisionNumber, latestRevisionId). Call this before claiming a deliverable exists.",
+      parameters: {
+        type: "object",
+        properties: {
+          issueId: { type: "string" },
+        },
+        required: ["issueId"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "paperclip_put_document",
+      description:
+        "Create or update a structured issue document under a key (e.g. 'plan', 'finanzplan', 'analyse'). This is the ONLY way to attach a real deliverable artifact to an issue — comments and external vault files are NOT issue documents. For updates, pass baseRevisionId from a prior paperclip_list_documents call. Body is Markdown.",
+      parameters: {
+        type: "object",
+        properties: {
+          issueId: { type: "string", description: "Issue UUID" },
+          key: {
+            type: "string",
+            description:
+              "Document key: lowercase letters/digits/_/-, max 64 chars. E.g. 'finanzplan'.",
+          },
+          title: { type: "string", description: "Human-readable title" },
+          body: { type: "string", description: "Markdown body of the document" },
+          format: {
+            type: "string",
+            enum: ["markdown"],
+            description: "Document format. Currently only 'markdown'. Defaults to 'markdown'.",
+          },
+          changeSummary: {
+            type: "string",
+            description: "Short summary of what changed (for revision history).",
+          },
+          baseRevisionId: {
+            type: "string",
+            description:
+              "UUID of the revision this update is based on. Omit on first create.",
+          },
+        },
+        required: ["issueId", "key", "body"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "fs_read_file",
       description: "Read a file's content from the agent's working directory.",
       parameters: {

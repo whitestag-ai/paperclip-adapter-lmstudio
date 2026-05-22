@@ -107,6 +107,24 @@ export async function executePaperclipTool(
       });
     }
 
+    case "paperclip_list_documents": {
+      const issueId = String(args.issueId);
+      return callApi("GET", `/api/issues/${issueId}/documents`, ctx);
+    }
+
+    case "paperclip_put_document": {
+      const issueId = String(args.issueId);
+      const key = String(args.key).trim().toLowerCase();
+      const body: Record<string, unknown> = {
+        format: args.format ? String(args.format) : "markdown",
+        body: String(args.body ?? ""),
+      };
+      if (args.title !== undefined && args.title !== null) body.title = String(args.title);
+      if (args.changeSummary) body.changeSummary = String(args.changeSummary);
+      if (args.baseRevisionId) body.baseRevisionId = String(args.baseRevisionId);
+      return callApi("PUT", `/api/issues/${issueId}/documents/${key}`, ctx, body);
+    }
+
     default:
       return { content: `Unknown Paperclip tool: ${name}`, isError: true };
   }

@@ -23,7 +23,7 @@ describe("adapter integration", () => {
     expect(keys).toContain("maxIterations");
   });
 
-  it("PAPERCLIP_TOOLS has 18 tools available to execute()", () => {
-    expect(PAPERCLIP_TOOLS.length).toBe(18);
+  it("PAPERCLIP_TOOLS has 20 tools available to execute()", () => {
+    expect(PAPERCLIP_TOOLS.length).toBe(20);
   });
 });
