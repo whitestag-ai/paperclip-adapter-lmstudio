@@ -123,6 +123,13 @@ export function createServerAdapter(): ServerAdapterModule {
             type: "text" as const,
             hint: "Optionaler absoluter Pfad zu einer Markdown-Datei, die als Agent-Persona an den System-Prompt angehängt wird",
           },
+          {
+            key: "mcpServers",
+            label: "MCP Servers (JSON)",
+            type: "text" as const,
+            required: false,
+            hint: "Map of name → { command, args?, env? }. Each is spawned as a stdio MCP server at run start; its tools become available to the agent as mcp__<name>__<tool>.",
+          },
         ],
       };
     },
