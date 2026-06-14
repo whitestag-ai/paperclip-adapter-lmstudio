@@ -10,6 +10,7 @@ Der Adapter verbindet Paperclip-Agenten mit lokalen LLMs in LM Studio und implem
 - **OpenAI Function Calling** Standard (funktioniert mit allen LM Studio Modellen die Function Calling unterstützen)
 - **Hybrid-Streaming:** Tool-Iterationen als Request-Response, finale Antwort als Token-Stream
 - **Sicherheit:** Path-Traversal-Schutz, Shell-Timeouts, Run-ID-Audit-Trail
+- **Paperclip-Skills:** dem Agent zugewiesene Skills werden in den System-Prompt eingespeist (siehe unten)
 
 ## Voraussetzungen
 
@@ -74,6 +75,22 @@ Ablauf pro Heartbeat:
 4. Auch Fallback nicht erreichbar → Run schlägt fehl mit `errorCode: "llm_unreachable"`.
 
 Wechselt der Adapter mitten im Heartbeat (z.B. weil der Primary während eines Calls abstürzt), bleibt er sticky auf dem Fallback bis zum Heartbeat-Ende. Der nächste Heartbeat probiert wieder Primary zuerst.
+
+## Paperclip-Skills
+
+Die Skills, die du einem Agent in Paperclip zuweist, werden vom Server an jeden Run geliefert (über die Adapter-Config-Keys `paperclipRuntimeSkills` und `paperclipSkillSync`). Da dieser Adapter seine eigene Agent-Loop mit handgebautem System-Prompt fährt — statt einer CLI, die ein Skills-Verzeichnis selbst entdeckt — bringt er sie selbst ein, mit **Progressive Disclosure**, damit der Basis-Prompt auch bei vielen Skills klein bleibt:
+
+- Der System-Prompt erhält einen kompakten **`## Available Skills`**-Index — pro Skill nur **Name + Beschreibung** (je eine Zeile), nicht den vollen Inhalt.
+- Ein `skill_read`-Tool wird dem Modell angeboten (nur wenn der Agent Skills hat). Das Modell ruft `skill_read` mit dem Skill-Namen auf, um die vollständige `SKILL.md` bei Bedarf zu laden — direkt bevor es eine passende Aufgabe angeht.
+
+Auflösungsregeln:
+
+- Skills, die im `SKILL.md`-Frontmatter als `required` markiert sind, sind immer aktiv.
+- Explizit für den Agent ausgewählte Skills kommen oben drauf (gematcht nach Key, Runtime-Name oder Slug).
+- Sowohl gebündelte (`paperclipai/paperclip/*`) als auch Firmen-Katalog-Skills (`local/*`) werden unterstützt.
+- Ein Skill, dessen `SKILL.md` nicht lesbar ist, wird übersprungen — er bricht den Run nie ab.
+
+Jeder Run mit Skills loggt ein `system`-Event mit den angebotenen Skills. Warum Progressive Disclosure: ein Skill-Body hat im Schnitt ~1,8k Tokens — 10–19 Skills (üblich bei größeren Agents) eifrig einzuspeisen würde jeden Prompt um 18–35k Tokens aufblähen und auf lokalen Modellen mit knappem Kontextfenster die eigentliche Aufgabe verdrängen.
 
 ## Verfügbare Tools
 

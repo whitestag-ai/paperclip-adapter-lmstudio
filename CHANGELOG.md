@@ -2,7 +2,7 @@
 
 All notable changes to this project are documented here. This project follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.1.0] - 2026-06-14
 
 ### Added
 
@@ -25,4 +25,5 @@ All notable changes to this project are documented here. This project follows [S
 - Path-traversal guards for filesystem tools, shell timeouts, run-ID audit trail.
 - Unit and integration test suites (opt-in integration via `DPO_INTEGRATION=1` / live LM Studio).
 
+[1.1.0]: https://github.com/whitestag-ai/paperclip-adapter-lmstudio/releases/tag/v1.1.0
 [1.0.0]: https://github.com/whitestag-ai/paperclip-adapter-lmstudio/releases/tag/v1.0.0
