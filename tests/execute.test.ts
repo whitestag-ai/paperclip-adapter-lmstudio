@@ -1,5 +1,32 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { execute, parseMcpServersConfig } from "../src/server/execute.js";
+import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { execute, parseMcpServersConfig, buildSystemPrompt } from "../src/server/execute.js";
+
+const AGENT = {
+  id: "agent-1",
+  companyId: "company-1",
+  name: "Test Agent",
+  adapterType: "lmstudio_local",
+  adapterConfig: {},
+};
+
+describe("buildSystemPrompt skills section", () => {
+  it("embeds a pre-rendered skills section when present", () => {
+    const prompt = buildSystemPrompt(AGENT, {
+      agentSkillsSection: "## Available Skills\n\n### Skill: doc-maintenance\n\nDetect drift.",
+    });
+    expect(prompt).toContain("## Available Skills");
+    expect(prompt).toContain("doc-maintenance");
+    expect(prompt).toContain("Detect drift.");
+  });
+
+  it("omits the skills section when none is provided", () => {
+    const prompt = buildSystemPrompt(AGENT, {});
+    expect(prompt).not.toContain("## Available Skills");
+  });
+});
 
 describe("parseMcpServersConfig", () => {
   const server = { command: "/bin/srv", args: ["--x"] };
@@ -174,6 +201,60 @@ describe("execute (agent loop)", () => {
     const result = await execute(ctx as any);
     expect(result.exitCode).toBe(1);
     expect(result.errorCode).toBe("no_model");
+  });
+
+  it("offers a desired skill as a prompt index + skill_read tool (progressive disclosure)", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "lmstudio-e2e-skills-"));
+    try {
+      const skillDir = path.join(root, "doc-maintenance");
+      await mkdir(skillDir, { recursive: true });
+      await writeFile(
+        path.join(skillDir, "SKILL.md"),
+        "---\nname: doc-maintenance\ndescription: Detect documentation drift.\n---\n# Doc Maintenance\nDETAILED_BODY_TEXT here.",
+        "utf8",
+      );
+
+      const streamBody = 'data: {"choices":[{"delta":{"content":"Done"}}]}\n\ndata: [DONE]\n\n';
+      const mockBody = new ReadableStream({
+        start(c) { c.enqueue(new TextEncoder().encode(streamBody)); c.close(); },
+      });
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ data: [{ id: "m" }] }) })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ choices: [{ message: { role: "assistant", content: "All done" } }] }),
+        })
+        .mockResolvedValueOnce({ ok: true, body: mockBody });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const ctx = makeCtx({
+        paperclipRuntimeSkills: [
+          { key: "paperclipai/paperclip/doc-maintenance", runtimeName: "doc-maintenance", source: skillDir, required: false },
+        ],
+        paperclipSkillSync: { desiredSkills: ["doc-maintenance"] },
+      });
+      const result = await execute(ctx as any);
+      expect(result.exitCode).toBe(0);
+
+      const chatCall = fetchMock.mock.calls.find(
+        ([url]) => typeof url === "string" && url.includes("/chat/completions"),
+      );
+      expect(chatCall).toBeTruthy();
+      const sentBody = JSON.parse((chatCall![1] as { body: string }).body);
+      const systemPrompt = sentBody.messages.find((m: { role: string }) => m.role === "system").content;
+
+      // Index present (name + description), full body NOT eagerly injected.
+      expect(systemPrompt).toContain("## Available Skills");
+      expect(systemPrompt).toContain("doc-maintenance");
+      expect(systemPrompt).toContain("Detect documentation drift.");
+      expect(systemPrompt).not.toContain("DETAILED_BODY_TEXT");
+
+      // skill_read tool offered to the model.
+      const toolNames = (sentBody.tools ?? []).map((t: any) => t.function?.name);
+      expect(toolNames).toContain("skill_read");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
 

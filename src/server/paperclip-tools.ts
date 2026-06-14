@@ -76,6 +76,9 @@ export async function executePaperclipTool(
       if (args.priority) body.priority = args.priority;
       if (args.title) body.title = args.title;
       if (args.description) body.description = args.description;
+      if (Array.isArray(args.blockedByIssueIds)) {
+        body.blockedByIssueIds = args.blockedByIssueIds.map(String);
+      }
       return callApi("PATCH", `/api/issues/${issueId}`, ctx, body);
     }
 
@@ -97,14 +100,18 @@ export async function executePaperclipTool(
     }
 
     case "paperclip_create_subtask": {
-      return callApi("POST", `/api/companies/${ctx.companyId}/issues`, ctx, {
+      const body: Record<string, unknown> = {
         title: String(args.title),
         description: args.description ? String(args.description) : undefined,
         parentId: String(args.parentId),
         assigneeAgentId: args.assigneeAgentId ? String(args.assigneeAgentId) : undefined,
         priority: args.priority ? String(args.priority) : "medium",
         status: args.status ? String(args.status) : "todo",
-      });
+      };
+      if (Array.isArray(args.blockedByIssueIds)) {
+        body.blockedByIssueIds = args.blockedByIssueIds.map(String);
+      }
+      return callApi("POST", `/api/companies/${ctx.companyId}/issues`, ctx, body);
     }
 
     case "paperclip_list_documents": {

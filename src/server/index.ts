@@ -2,6 +2,7 @@ import { type, agentConfigurationDoc } from "../index.js";
 import { execute } from "./execute.js";
 import { testEnvironment } from "./test.js";
 import { fetchModels } from "./models.js";
+import { listSkills, syncSkills, type SkillContext, type SkillSnapshot } from "./skills.js";
 
 interface ConfigSchemaField {
   key: string;
@@ -26,6 +27,9 @@ interface ServerAdapterModule {
   supportsLocalAgentJwt?: boolean;
   listModels?: () => Promise<Array<{ id: string; label: string }>>;
   getConfigSchema?: () => Promise<AdapterConfigSchema>;
+  listSkills?: (ctx: SkillContext) => Promise<SkillSnapshot>;
+  syncSkills?: (ctx: SkillContext, desiredSkills: string[]) => Promise<SkillSnapshot>;
+  requiresMaterializedRuntimeSkills?: boolean;
 }
 
 export function createServerAdapter(): ServerAdapterModule {
@@ -35,6 +39,12 @@ export function createServerAdapter(): ServerAdapterModule {
     testEnvironment,
     agentConfigurationDoc,
     supportsLocalAgentJwt: true,
+    // Skills are resolved per run and surfaced via the prompt index + skill_read
+    // tool (ephemeral), not installed into a CLI skills-home — so no
+    // materialization step is required.
+    requiresMaterializedRuntimeSkills: false,
+    listSkills,
+    syncSkills,
     async listModels() {
       const models = await fetchModels("http://localhost:1234");
       return models.map((id) => ({ id, label: id }));

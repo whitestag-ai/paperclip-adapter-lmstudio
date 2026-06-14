@@ -2,6 +2,7 @@ import { executePaperclipTool, PaperclipContext, ToolResult } from "./paperclip-
 import { executeFsTool } from "./fs-tools.js";
 import { executeShellTool } from "./shell-tools.js";
 import type { McpRegistry } from "./mcp-client.js";
+import { findSkillByName, type ResolvedSkill } from "./skills.js";
 
 export interface DispatchParams {
   name: string;
@@ -11,6 +12,8 @@ export interface DispatchParams {
   allowedWriteRoots?: string[];
   mcpRegistry?: McpRegistry;
   mcpCallTimeoutMs?: number;
+  /** Skills loaded for this run, used to serve `skill_read` on demand. */
+  skills?: ResolvedSkill[];
 }
 
 export async function dispatchTool(params: DispatchParams): Promise<ToolResult> {
@@ -22,7 +25,24 @@ export async function dispatchTool(params: DispatchParams): Promise<ToolResult> 
     allowedWriteRoots = [],
     mcpRegistry,
     mcpCallTimeoutMs = 30000,
+    skills = [],
   } = params;
+
+  if (name === "skill_read") {
+    const requested = typeof args.name === "string" ? args.name : "";
+    if (!requested) {
+      return { content: "skill_read requires a 'name' argument.", isError: true };
+    }
+    const skill = findSkillByName(skills, requested);
+    if (!skill) {
+      const available = skills.map((s) => s.runtimeName).join(", ") || "(none)";
+      return {
+        content: `Unknown skill "${requested}". Available skills: ${available}.`,
+        isError: true,
+      };
+    }
+    return { content: skill.content, isError: false };
+  }
 
   if (name.startsWith("mcp__")) {
     if (mcpRegistry && mcpRegistry.has(name)) {

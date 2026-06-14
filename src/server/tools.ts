@@ -51,7 +51,7 @@ export const PAPERCLIP_TOOLS: ToolDefinition[] = [
     type: "function",
     function: {
       name: "paperclip_update_issue",
-      description: "Update issue status, priority, or add a comment.",
+      description: "Update issue status, priority, blockers, or add a comment.",
       parameters: {
         type: "object",
         properties: {
@@ -67,6 +67,11 @@ export const PAPERCLIP_TOOLS: ToolDefinition[] = [
           },
           title: { type: "string" },
           description: { type: "string" },
+          blockedByIssueIds: {
+            type: "array",
+            items: { type: "string" },
+            description: "UUIDs of issues that block this one. Empty array clears blockers.",
+          },
         },
         required: ["issueId"],
       },
@@ -134,6 +139,11 @@ export const PAPERCLIP_TOOLS: ToolDefinition[] = [
           status: {
             type: "string",
             enum: ["backlog", "todo", "in_progress"],
+          },
+          blockedByIssueIds: {
+            type: "array",
+            items: { type: "string" },
+            description: "UUIDs of issues that must be done before this subtask can start. Use to chain subtasks sequentially.",
           },
         },
         required: ["title", "parentId"],
@@ -335,3 +345,28 @@ export const PAPERCLIP_TOOLS: ToolDefinition[] = [
     },
   },
 ];
+
+/**
+ * On-demand skill loader. Only offered to the model when the agent has skills
+ * assigned. The system prompt lists skill names + descriptions; the model calls
+ * this to pull a skill's full instructions before acting on it (progressive
+ * disclosure — keeps the base prompt small for local models).
+ */
+export const SKILL_READ_TOOL: ToolDefinition = {
+  type: "function",
+  function: {
+    name: "skill_read",
+    description:
+      "Load the full instructions for one of the available skills listed in the system prompt. Call this with the skill's name before performing a task that matches that skill.",
+    parameters: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "The skill name exactly as listed under 'Available Skills'.",
+        },
+      },
+      required: ["name"],
+    },
+  },
+};

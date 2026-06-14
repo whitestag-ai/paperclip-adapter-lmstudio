@@ -60,6 +60,46 @@ describe("dispatchTool", () => {
   });
 });
 
+describe("dispatchTool skill_read routing", () => {
+  const skills = [
+    { key: "paperclipai/paperclip/doc-maintenance", runtimeName: "doc-maintenance", description: "Detect drift.", content: "# Doc Maintenance\nFull instructions." },
+  ];
+
+  it("returns the full SKILL.md body for a known skill name", async () => {
+    const result = await dispatchTool({
+      name: "skill_read",
+      args: { name: "doc-maintenance" },
+      cwd: "/tmp",
+      paperclipCtx: {} as never,
+      skills,
+    });
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain("Full instructions.");
+  });
+
+  it("returns an error for an unknown skill name", async () => {
+    const result = await dispatchTool({
+      name: "skill_read",
+      args: { name: "does-not-exist" },
+      cwd: "/tmp",
+      paperclipCtx: {} as never,
+      skills,
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("does-not-exist");
+  });
+
+  it("errors cleanly when no skills are available", async () => {
+    const result = await dispatchTool({
+      name: "skill_read",
+      args: { name: "doc-maintenance" },
+      cwd: "/tmp",
+      paperclipCtx: {} as never,
+    });
+    expect(result.isError).toBe(true);
+  });
+});
+
 describe("dispatchTool MCP routing", () => {
   it("routes mcp__ tools to the registry", async () => {
     const registry = { has: () => true, call: vi.fn().mockResolvedValue({ content: "ok", isError: false }) } as unknown as McpRegistry;

@@ -16,6 +16,7 @@ Connects Paperclip agents to local LLMs served by LM Studio and implements a com
 - **Hybrid streaming:** tool iterations as request/response, final answer as token stream
 - **Safety:** path-traversal guards, shell timeouts, run-ID audit trail
 - **Primary + fallback endpoint** with health probes and sticky mid-call switching
+- **Paperclip skills:** skills selected for the agent are injected into the system prompt (see below)
 
 ## Requirements
 
@@ -81,6 +82,22 @@ Per heartbeat:
 4. Fallback also unreachable → run fails with `errorCode: "llm_unreachable"`.
 
 If the adapter switches mid-heartbeat (e.g. primary crashes during a call), it stays sticky on the fallback until the heartbeat ends. The next heartbeat tries primary first again.
+
+## Paperclip skills
+
+Skills you assign to an agent in Paperclip are delivered to each run by the server (via the `paperclipRuntimeSkills` and `paperclipSkillSync` adapter-config keys). Because this adapter runs its own agent loop rather than a CLI that auto-discovers a skills directory, it surfaces them itself — using **progressive disclosure** so the base prompt stays small even for agents with many skills:
+
+- The system prompt gets a compact **`## Available Skills`** index — each skill's **name + description** only (one line each), not the full body.
+- A `skill_read` tool is offered to the model (only when the agent has skills). The model calls `skill_read` with a skill's name to pull that skill's full `SKILL.md` instructions on demand, right before acting on a matching task.
+
+Resolution rules:
+
+- Skills marked `required` in their `SKILL.md` frontmatter are always active.
+- Skills explicitly selected for the agent are added on top (matched by key, runtime name, or slug).
+- Both bundled (`paperclipai/paperclip/*`) and company-catalog (`local/*`) skills are supported.
+- A skill whose `SKILL.md` cannot be read is skipped — it never aborts the run.
+
+Each run with skills logs a `system` event listing the skills offered. Why progressive disclosure: a skill body averages ~1.8k tokens, so eagerly injecting 10–19 skills (common for fuller agents) would add 18–35k tokens to every prompt and crowd out the task on local models with tight context windows.
 
 ## Available tools
 

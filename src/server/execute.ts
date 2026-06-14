@@ -8,10 +8,11 @@ import {
 } from "./llm-client.js";
 import { resolvePrimaryOrFallback, type Endpoint } from "./endpoint-resolver.js";
 import { dispatchTool } from "./tool-executor.js";
-import { PAPERCLIP_TOOLS } from "./tools.js";
+import { PAPERCLIP_TOOLS, SKILL_READ_TOOL } from "./tools.js";
 import { McpRegistry, type McpServerConfig } from "./mcp-client.js";
 import { executePaperclipTool, type PaperclipContext } from "./paperclip-tools.js";
 import { inferTerminalStatusFromFinalMessage } from "./guard-inference.js";
+import { loadDesiredSkills, renderSkillsIndex } from "./skills.js";
 
 interface ExecutionContext {
   runId: string;
@@ -79,7 +80,7 @@ export function parseMcpServersConfig(
   return candidate as Record<string, McpServerConfig>;
 }
 
-function buildSystemPrompt(
+export function buildSystemPrompt(
   agent: ExecutionContext["agent"],
   context: Record<string, unknown>,
   mcpToolNames: string[] = [],
@@ -138,6 +139,12 @@ function buildSystemPrompt(
   const fileInstructions = asString(context.agentInstructionsFromFile, "");
   if (fileInstructions) {
     parts.push("", "## Agent Persona", fileInstructions);
+  }
+
+  // Paperclip skills selected for this agent, pre-rendered by buildSkillsSection.
+  const skillsSection = asString(context.agentSkillsSection, "");
+  if (skillsSection) {
+    parts.push("", skillsSection);
   }
 
   return parts.join("\n");
@@ -380,7 +387,6 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
 
   const mcpRegistry = await McpRegistry.connect(mcpServersConfig, ctx.onLog);
   const mcpTools = mcpRegistry.toolDefinitions();
-  const tools = mcpTools.length > 0 ? [...PAPERCLIP_TOOLS, ...mcpTools] : PAPERCLIP_TOOLS;
 
   // Try a failover on a typed LlmClientError. Returns true if we switched,
   // false if no fallback is available or error kind isn't a failover trigger.
@@ -411,9 +417,33 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
   }
 
   const fileInstructions = await loadInstructionsFromFile(config, ctx.onLog);
-  const systemPromptContext = fileInstructions
-    ? { ...ctx.context, agentInstructionsFromFile: fileInstructions }
-    : ctx.context;
+
+  // Inject Paperclip skills selected for this agent. The server delivers them
+  // via config.paperclipRuntimeSkills + config.paperclipSkillSync; unlike the
+  // CLI-backed adapters there is no auto-discovery. We use progressive
+  // disclosure: a compact name+description index goes into the system prompt,
+  // and the model pulls a skill's full body on demand via the skill_read tool.
+  // This keeps the base prompt small even for agents with many skills.
+  const desiredSkills = await loadDesiredSkills(config);
+  const skillsSection = renderSkillsIndex(desiredSkills);
+  if (desiredSkills.length > 0) {
+    await logEvent(ctx.onLog, {
+      kind: "system",
+      text: `Offered ${desiredSkills.length} Paperclip skill(s) via skill_read: ${desiredSkills
+        .map((s) => s.runtimeName)
+        .join(", ")}`,
+    });
+  }
+
+  // Only expose skill_read when the agent actually has skills.
+  const baseTools = mcpTools.length > 0 ? [...PAPERCLIP_TOOLS, ...mcpTools] : PAPERCLIP_TOOLS;
+  const tools = desiredSkills.length > 0 ? [...baseTools, SKILL_READ_TOOL] : baseTools;
+
+  const systemPromptContext = {
+    ...ctx.context,
+    ...(fileInstructions ? { agentInstructionsFromFile: fileInstructions } : {}),
+    ...(skillsSection ? { agentSkillsSection: skillsSection } : {}),
+  };
 
   const messages: ChatMessage[] = [
     { role: "system", content: buildSystemPrompt(ctx.agent, systemPromptContext, mcpRegistry.toolNames()) },
@@ -579,6 +609,7 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
         allowedWriteRoots,
         mcpRegistry,
         mcpCallTimeoutMs: Math.max(1000, Math.min(30000, remainingRunMs() || 30000)),
+        skills: desiredSkills,
       });
 
       // Track checkout and terminal-status updates for the post-run guard.
