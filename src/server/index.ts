@@ -7,11 +7,12 @@ import { listSkills, syncSkills, type SkillContext, type SkillSnapshot } from ".
 interface ConfigSchemaField {
   key: string;
   label: string;
-  type: "text" | "number" | "boolean" | "select";
+  type: "text" | "number" | "boolean" | "select" | "combobox";
   required?: boolean;
   default?: unknown;
   hint?: string;
   options?: Array<{ value: string; label: string }>;
+  meta?: Record<string, unknown>;
 }
 
 interface AdapterConfigSchema {
@@ -25,7 +26,7 @@ interface ServerAdapterModule {
   testEnvironment: typeof testEnvironment;
   agentConfigurationDoc?: string;
   supportsLocalAgentJwt?: boolean;
-  listModels?: () => Promise<Array<{ id: string; label: string }>>;
+  listModels?: (opts?: { url?: string }) => Promise<Array<{ id: string; label: string }>>;
   getConfigSchema?: () => Promise<AdapterConfigSchema>;
   listSkills?: (ctx: SkillContext) => Promise<SkillSnapshot>;
   syncSkills?: (ctx: SkillContext, desiredSkills: string[]) => Promise<SkillSnapshot>;
@@ -45,13 +46,12 @@ export function createServerAdapter(): ServerAdapterModule {
     requiresMaterializedRuntimeSkills: false,
     listSkills,
     syncSkills,
-    async listModels() {
-      const models = await fetchModels("http://localhost:1234");
+    async listModels(opts) {
+      const url = opts?.url?.trim() || "http://localhost:1234";
+      const models = await fetchModels(url);
       return models.map((id) => ({ id, label: id }));
     },
     async getConfigSchema() {
-      const models = await fetchModels("http://localhost:1234");
-      const modelOptions = models.map((id) => ({ value: id, label: id }));
       return {
         version: 1,
         fields: [
@@ -66,13 +66,10 @@ export function createServerAdapter(): ServerAdapterModule {
           {
             key: "defaultModel",
             label: "Modell",
-            type: "select" as const,
+            type: "combobox" as const,
             required: true,
-            hint: "LLM-Modell aus LM Studio",
-            options:
-              modelOptions.length > 0
-                ? modelOptions
-                : [{ value: "", label: "(LM Studio nicht erreichbar)" }],
+            hint: "LLM-Modell aus LM Studio (wird beim Öffnen von der oben eingetragenen URL geladen)",
+            meta: { optionsFromUrlField: "url" },
           },
           {
             key: "fallbackUrl",
@@ -83,8 +80,12 @@ export function createServerAdapter(): ServerAdapterModule {
           {
             key: "fallbackModel",
             label: "Fallback-Modell (optional)",
-            type: "text" as const,
+            type: "combobox" as const,
             hint: "Modellname auf dem Fallback-Host. Leer = gleicher Name wie Primary-Modell.",
+            meta: {
+              optionsFromUrlField: "fallbackUrl",
+              disabledWhenEmpty: "fallbackUrl",
+            },
           },
           {
             key: "probeTimeoutMs",

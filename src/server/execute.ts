@@ -101,24 +101,28 @@ export function buildSystemPrompt(
     "",
     "## MANDATORY Heartbeat Procedure",
     "",
-    "You MUST follow these steps in order for EVERY task:",
+    "You MUST follow these steps in order for EVERY heartbeat:",
     "",
-    "1. **Checkout the issue** — call `paperclip_checkout_issue` with the issueId.",
-    "2. **Understand the task** — call `paperclip_get_issue_context` to see the full description and history.",
+    "1. **Check inbox first** — call `paperclip_get_inbox` to see your assigned tasks.",
+    "2. **EMPTY-INBOX EXIT** — If the inbox returns no actionable tasks (no items with status `todo`, `in_progress`, `in_review`, or `blocked` assigned to you), respond with EXACTLY ONE short sentence: `\"No work assigned, exiting heartbeat.\"` DO NOT call any other tool. DO NOT write files. DO NOT run shell commands. DO NOT curl any API. End the heartbeat immediately.",
+    "3. **Checkout the issue** — call `paperclip_checkout_issue` with the issueId of the task you will work on.",
+    "4. **Understand the task** — call `paperclip_get_issue_context` to see the full description and history.",
     mcpToolNames.length > 0
-      ? "3. **Do the work** — for ANY information about the user (health, nutrition, sleep, training, vitals, etc.) you MUST call the domain (MCP) tools listed above. They are the only source of that data. Do NOT use fs_* or shell to search the filesystem for the user's data — it is not there. Use filesystem/shell/git only when the task is explicitly about code or files."
-      : "3. **Do the work** — use filesystem/shell/git tools as needed.",
-    "4. **CRITICAL: Close the loop** — call `paperclip_update_issue` with EXACTLY these parameters:",
+      ? "5. **Do the work** — for ANY information about the user (health, nutrition, sleep, training, vitals, etc.) you MUST call the domain (MCP) tools listed above. They are the only source of that data. Do NOT use fs_* or shell to search the filesystem for the user's data — it is not there. Use filesystem/shell/git only when the task is explicitly about code or files."
+      : "5. **Do the work** — use filesystem/shell/git tools as needed.",
+    "6. **CRITICAL: Close the loop** — call `paperclip_update_issue` with EXACTLY these parameters:",
     '   - `status: "done"` (or `"blocked"` if you cannot complete, `"in_review"` if awaiting human approval)',
     "   - `comment`: a short markdown summary of what you did (what was accomplished, any files created, any blockers)",
     "",
     "## Rules that are NEVER optional",
     "",
-    "- Before you return a final text answer, you MUST have called `paperclip_update_issue` with a final status.",
-    '- If you skip step 4, the task is considered FAILED regardless of what work you did. The issue will remain stuck in `in_progress` and Paperclip will flag it as a stranded run.',
-    '- Do not give a final text reply until AFTER `paperclip_update_issue` has been called successfully.',
+    "- **Empty inbox = clean exit.** If `paperclip_get_inbox` returns nothing actionable, the ONLY allowed action is the exit sentence from step 2. Any other tool call (file write, shell exec, exploratory curl, git commit, writing a heartbeat-log markdown file) is forbidden and will be flagged as a runaway heartbeat.",
+    "- Before you return a final text answer for ACTUAL WORK, you MUST have called `paperclip_update_issue` with a final status.",
+    '- If you checked out an issue but skipped step 6, the task is considered FAILED. The issue will remain stuck in `in_progress` and Paperclip will flag it as a stranded run.',
+    '- Do not give a final text reply (other than the empty-inbox exit sentence) until AFTER `paperclip_update_issue` has been called successfully.',
     "- If a tool call returned an error, address the error (retry with corrected parameters or mark the issue `blocked` with an explanation). Do not silently ignore errors.",
-    "- If you are unsure of the issueId, call `paperclip_get_inbox` first to find your assigned tasks.",
+    "- Never invent issueIds (e.g. `\"none\"`, `\"unknown\"`). If you don't have a real issueId from `paperclip_get_inbox`, you must use the empty-inbox exit.",
+    "- Never call `shell_exec` with `curl` against the Paperclip API. Use the `paperclip_*` tools — they handle auth for you.",
     ...(mcpToolNames.length > 0
       ? [
           "- NEVER answer a question about the user's data from memory, assumption, or filesystem guesses. Call the relevant domain (MCP) tool and base your answer on its result. If no MCP tool covers the question, say so explicitly in the issue.",
@@ -459,8 +463,32 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
   const updatedIssues = new Set<string>();
   const TERMINAL_STATUSES = new Set(["done", "blocked", "cancelled", "in_review"]);
 
+  // Empty-heartbeat detector: set true when paperclip_get_inbox returns no
+  // actionable items. If the LLM keeps calling tools after that, we force-exit
+  // cleanly so a no-work heartbeat doesn't burn 25 iterations / 100k tokens.
+  let emptyInboxObserved = false;
+
   try {
   for (let iteration = 0; iteration < maxIterations; iteration++) {
+    // Early empty-heartbeat exit: if we already observed an empty inbox and
+    // the LLM has not checked out any real issue by iteration 2, this is a
+    // runaway no-work heartbeat. Treat as a successful no-op.
+    if (iteration >= 2 && emptyInboxObserved && checkedOutIssues.size === 0) {
+      await logEvent(ctx.onLog, {
+        kind: "system",
+        text: `Empty-heartbeat exit: inbox returned no actionable items, no issue was checked out. Stopping after iteration ${iteration} to avoid runaway loop.`,
+      });
+      return {
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        model: currentEndpoint.model,
+        provider: "lmstudio",
+        summary: "Empty heartbeat — inbox returned no actionable tasks.",
+        usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens },
+      };
+    }
+
     if (Date.now() > runDeadlineMs) {
       await runPostRunGuard({
         checkedOutIssues,
@@ -627,6 +655,16 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
             const issueId = canonicalIssueIdFromResult(result.content, args);
             if (issueId) updatedIssues.add(issueId);
           }
+        } else if (toolCall.function.name === "paperclip_get_inbox") {
+          // Empty-heartbeat detector. The inbox-lite endpoint returns a JSON
+          // array; an empty array means no actionable assignments.
+          try {
+            const parsed = JSON.parse(result.content);
+            emptyInboxObserved = Array.isArray(parsed) && parsed.length === 0;
+          } catch {
+            // Parse failure — leave the flag as it is; we only react to
+            // unambiguous empty results.
+          }
         }
       }
 
@@ -645,6 +683,25 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
         content: result.isError ? `Error: ${result.content}` : result.content,
       });
     }
+  }
+
+  // If we hit max iterations after observing an empty inbox and never
+  // checked out anything, this was a no-work heartbeat the LLM couldn't exit
+  // on its own. Don't flag it as a failed run.
+  if (emptyInboxObserved && checkedOutIssues.size === 0) {
+    await logEvent(ctx.onLog, {
+      kind: "system",
+      text: `Empty-heartbeat exit at max iterations: inbox was empty and no issue was checked out. Treating as clean no-op.`,
+    });
+    return {
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      model: currentEndpoint.model,
+      provider: "lmstudio",
+      summary: "Empty heartbeat — inbox returned no actionable tasks.",
+      usage: { inputTokens: totalInputTokens, outputTokens: totalOutputTokens },
+    };
   }
 
   return {
