@@ -2,6 +2,28 @@
 
 All notable changes to this project are documented here. This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - 2026-06-14
+
+### Added
+
+- **Dynamic model listing.** `listModels` accepts an optional `{ url }` so the
+  Paperclip UI can enumerate the models served by the configured endpoint. The
+  config schema is now fully static, with `meta.optionsFromUrlField` /
+  `disabledWhenEmpty` driving the model picker.
+
+### Fixed
+
+- **Empty-inbox exit + runaway-heartbeat kill switch.** The system prompt now
+  starts with `paperclip_get_inbox` and an explicit empty-inbox exit sentence,
+  and the agent loop force-exits cleanly (`exitCode 0`) once an empty inbox is
+  observed and no issue was checked out. Previously, small local models
+  (qwen3, gemma, mistral-small) couldn't reconcile an empty inbox with the
+  "MUST checkout an issue" prompt and improvised curl/filesystem calls, burning
+  30k–100k tokens per no-work heartbeat and spamming the dashboard with failed
+  runs. MCP-awareness and the post-run guard are preserved.
+
+[1.2.0]: https://github.com/whitestag-ai/paperclip-adapter-lmstudio/releases/tag/v1.2.0
+
 ## [1.1.0] - 2026-06-14
 
 ### Added

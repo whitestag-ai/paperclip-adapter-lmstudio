@@ -17,6 +17,7 @@ Connects Paperclip agents to local LLMs served by LM Studio and implements a com
 - **Safety:** path-traversal guards, shell timeouts, run-ID audit trail
 - **Primary + fallback endpoint** with health probes and sticky mid-call switching
 - **Paperclip skills:** skills selected for the agent are injected into the system prompt (see below)
+- **Runaway-heartbeat safety:** empty inboxes exit cleanly instead of burning tokens on improvised tool calls
 
 ## Requirements
 

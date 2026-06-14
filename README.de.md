@@ -11,6 +11,7 @@ Der Adapter verbindet Paperclip-Agenten mit lokalen LLMs in LM Studio und implem
 - **Hybrid-Streaming:** Tool-Iterationen als Request-Response, finale Antwort als Token-Stream
 - **Sicherheit:** Path-Traversal-Schutz, Shell-Timeouts, Run-ID-Audit-Trail
 - **Paperclip-Skills:** dem Agent zugewiesene Skills werden in den System-Prompt eingespeist (siehe unten)
+- **Runaway-Heartbeat-Schutz:** leere Inboxen beenden sauber, statt Tokens für improvisierte Tool-Calls zu verbrennen
 
 ## Voraussetzungen
 
