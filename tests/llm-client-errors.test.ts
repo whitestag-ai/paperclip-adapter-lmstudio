@@ -55,6 +55,35 @@ describe("LlmClientError classification", () => {
     ).rejects.toMatchObject({ kind: "model" });
   });
 
+  it("classifies HTTP 400 model-load-guardrail failure as 'model' (triggers failover)", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      statusText: "Bad Request",
+      text: async () => JSON.stringify({
+        error: {
+          message:
+            'Failed to load model "qwen/qwen3-coder-next". Error: Model loading was ' +
+            "stopped due to insufficient system resources. Continuing to load the model " +
+            "would likely overload your system and cause it to freeze.",
+          type: "invalid_request_error",
+          param: "model",
+          code: null,
+        },
+      }),
+    }));
+
+    await expect(
+      callChatCompletion({
+        url: "http://localhost:1234",
+        model: "qwen/qwen3-coder-next",
+        messages: [],
+        tools: [],
+        timeoutMs: 1000,
+      }),
+    ).rejects.toMatchObject({ kind: "model" });
+  });
+
   it("classifies HTTP 500 as 'unknown'", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: false,

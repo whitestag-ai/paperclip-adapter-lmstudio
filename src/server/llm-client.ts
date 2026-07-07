@@ -66,7 +66,17 @@ function classifyFetchError(err: unknown): LlmClientError {
 }
 
 function classifyHttpError(status: number, body: string): LlmClientError {
-  if (/model.*not.*found|no.*model.*loaded/i.test(body)) {
+  // Treat as a "model" error (which triggers failover to fallbackModel) not only
+  // when the model is missing, but also when LM Studio refuses to JIT-load it —
+  // e.g. the RAM guardrail "Failed to load model … insufficient system resources".
+  // Without this, such a 400 fell through to "unknown" and never failed over, so a
+  // primary model that is only available on a remote GPU (daytime RTX box) would
+  // hard-fail locally instead of dropping to the loaded local fallback model.
+  if (
+    /model.*not.*found|no.*model.*loaded|failed to load model|insufficient system resources|model loading was stopped/i.test(
+      body,
+    )
+  ) {
     return new LlmClientError(
       "model",
       `LM Studio model error ${status}: ${body || "model not found"}`,
