@@ -25,7 +25,7 @@
       "env": { "PAPERCLIP_HEALTH_DB_URL": "postgresql://…" } } }
   ```
 
-**Runtime prerequisite (NOT part of this plan):** the CHO agent's `PAPERCLIP_HEALTH_DB_URL` currently has the placeholder password `temp-change-me-walter`. The real `paperclip_health_mcp` role password must be set before a live run can read data. This plan makes the routing work; the password is a config fix Walter applies separately.
+**Runtime prerequisite (NOT part of this plan):** the CHO agent's `PAPERCLIP_HEALTH_DB_URL` currently has the placeholder password `$(sed -n 's/^HEALTH_MCP_PASSWORD=//p' ~/.paperclip/instances/default/secrets/health_db.env)`. The real `paperclip_health_mcp` role password must be set before a live run can read data. This plan makes the routing work; the password is a config fix Walter applies separately.
 
 ---
 
@@ -520,7 +520,7 @@ Expected: `dist/` rebuilt with no errors.
 
 - [ ] **Step 3: Live smoke test against the health MCP server**
 
-Precondition: set the real `paperclip_health_mcp` password in the CHO agent's `PAPERCLIP_HEALTH_DB_URL` (replace `temp-change-me-walter`).
+Precondition: set the real `paperclip_health_mcp` password in the CHO agent's `PAPERCLIP_HEALTH_DB_URL` (replace `$(sed -n 's/^HEALTH_MCP_PASSWORD=//p' ~/.paperclip/instances/default/secrets/health_db.env)`).
 
 Unpark and run one issue:
 ```bash
