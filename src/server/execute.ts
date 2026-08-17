@@ -311,6 +311,9 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
   const probeTimeoutMs = asNumber(config.probeTimeoutMs, 8000);
   const probeRetryBackoffMs = asNumber(config.probeRetryBackoffMs, 500);
   const timeoutMs = asNumber(config.timeoutMs, 120000);
+  // Optional: schaltet das Denken von Reasoning-Modellen ab ("none") oder
+  // begrenzt es ("low"/"medium"/"high"). Leer = Modell entscheidet selbst.
+  const reasoningEffort = asString(config.reasoningEffort, "");
   const maxIterations = asNumber(config.maxIterations, 25);
   const maxRunSeconds = asNumber(config.maxRunSeconds, asNumber(config.timeoutSec, 300));
   const runStart = Date.now();
@@ -518,6 +521,7 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
         messages,
         tools,
         timeoutMs: callTimeoutMs(),
+        ...(reasoningEffort ? { reasoningEffort } : {}),
       });
     } catch (err) {
       const switched = await maybeSwitchToFallback(err, "chat completion");
@@ -533,6 +537,7 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
             messages,
             tools,
             timeoutMs: retryTimeoutMs,
+            ...(reasoningEffort ? { reasoningEffort } : {}),
           });
         } catch (err2) {
           const msg2 = err2 instanceof Error ? err2.message : String(err2);
@@ -584,6 +589,7 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
           onToken: async (token) => {
             await ctx.onLog("stdout", token);
           },
+          ...(reasoningEffort ? { reasoningEffort } : {}),
         });
       } catch {
         // Fallback: use the non-streamed content

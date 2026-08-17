@@ -8,6 +8,11 @@ export interface AssistantMessage {
   role: "assistant";
   content: string | null;
   tool_calls?: ToolCallInResponse[];
+  /**
+   * Denkprotokoll von Reasoning-Modellen (qwen3.6, qwen3.8, …). LM Studio legt
+   * die Antwort hier ab, solange das Modell denkt — `content` bleibt dann leer.
+   */
+  reasoning_content?: string | null;
 }
 
 export interface ChatMessage {
@@ -24,6 +29,13 @@ export interface CompletionRequest {
   messages: ChatMessage[];
   tools: unknown[];
   timeoutMs: number;
+  /**
+   * Denkaufwand des Modells, als `reasoning_effort` durchgereicht. `"none"`
+   * schaltet das Denken ab — bei Reasoning-Modellen der Unterschied zwischen
+   * 187 und knapp 2.000 Token fuer dieselbe Antwort. Weggelassen heisst: das
+   * Modell entscheidet selbst (bisheriges Verhalten).
+   */
+  reasoningEffort?: string;
 }
 
 export interface CompletionResponse {
@@ -85,6 +97,28 @@ function classifyHttpError(status: number, body: string): LlmClientError {
   return new LlmClientError("unknown", `LM Studio API error ${status}: ${body}`);
 }
 
+/**
+ * Rettet Antworten, die vollstaendig im Denkprotokoll gelandet sind.
+ *
+ * Reasoning-Modelle liefern `content: ""` und schreiben alles nach
+ * `reasoning_content` — auch bei `finish_reason: "stop"`. Ohne diesen Rueckfall
+ * reicht der Adapter eine leere Assistant-Nachricht in die Agentenschleife
+ * weiter, und der Ausfall ist von aussen nicht zu sehen.
+ *
+ * Ein leeres `content` NEBEN `tool_calls` ist dagegen voellig normal — dort wird
+ * bewusst nicht eingegriffen.
+ */
+function recoverReasoningOnlyMessage(message: AssistantMessage): AssistantMessage {
+  const hasContent = typeof message.content === "string" && message.content.length > 0;
+  const hasToolCalls = Array.isArray(message.tool_calls) && message.tool_calls.length > 0;
+  const reasoning = message.reasoning_content;
+
+  if (hasContent || hasToolCalls) return message;
+  if (typeof reasoning !== "string" || reasoning.length === 0) return message;
+
+  return { ...message, content: reasoning };
+}
+
 export async function callChatCompletion(req: CompletionRequest): Promise<CompletionResponse> {
   let response: Response;
   try {
@@ -97,6 +131,7 @@ export async function callChatCompletion(req: CompletionRequest): Promise<Comple
         tools: req.tools,
         tool_choice: "auto",
         stream: false,
+        ...(req.reasoningEffort ? { reasoning_effort: req.reasoningEffort } : {}),
       }),
       signal: AbortSignal.timeout(req.timeoutMs),
     });
@@ -118,7 +153,7 @@ export async function callChatCompletion(req: CompletionRequest): Promise<Comple
   if (!message) throw new LlmClientError("unknown", "No message in response");
 
   return {
-    message,
+    message: recoverReasoningOnlyMessage(message),
     usage: data.usage
       ? {
           inputTokens: data.usage.prompt_tokens ?? 0,
@@ -134,6 +169,8 @@ export interface StreamRequest {
   messages: ChatMessage[];
   timeoutMs: number;
   onToken: (token: string) => Promise<void>;
+  /** Wie bei {@link CompletionRequest.reasoningEffort}. */
+  reasoningEffort?: string;
 }
 
 export async function streamChatCompletion(req: StreamRequest): Promise<string> {
@@ -146,6 +183,7 @@ export async function streamChatCompletion(req: StreamRequest): Promise<string> 
         model: req.model,
         messages: req.messages,
         stream: true,
+        ...(req.reasoningEffort ? { reasoning_effort: req.reasoningEffort } : {}),
       }),
       signal: AbortSignal.timeout(req.timeoutMs),
     });
