@@ -508,11 +508,14 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
       );
       promptBudget = geladen ? Math.floor(geladen * DEFAULT_PROMPT_BUDGET_RATIO) : 0;
       if (promptBudget > 0) {
+        // `kind` ist Pflicht: der ui-parser erkennt ein Ereignis nur daran.
+        // Ohne das Feld landet die Zeile als `kind: "assistant"` im Transkript
+        // und sieht aus, als haette der Agent rohes JSON gesagt.
         await logEvent(ctx.onLog, {
-          type: "context_budget",
-          model: currentEndpoint.model,
-          loadedContextLength: geladen,
-          maxPromptTokens: promptBudget,
+          kind: "system",
+          text:
+            `Kontextbudget: ${currentEndpoint.model} laeuft mit Fenster ${geladen}; ` +
+            `Prompt wird auf ${promptBudget} Token gedeckelt.`,
         });
       }
     }
@@ -522,10 +525,11 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
     messages.length = 0;
     messages.push(...(gekuerzt as ChatMessage[]));
     await logEvent(ctx.onLog, {
-      type: "context_trimmed",
-      dropped,
-      maxPromptTokens: promptBudget,
-      estimatedTokens: estimateMessagesTokens(messages),
+      kind: "system",
+      text:
+        `Kontext gekuerzt: ${dropped} aeltere Nachrichten entfernt, damit der ` +
+        `Prompt unter ${promptBudget} Token bleibt ` +
+        `(jetzt ~${estimateMessagesTokens(messages)}).`,
     });
   }
 

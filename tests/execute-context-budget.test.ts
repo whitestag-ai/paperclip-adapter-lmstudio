@@ -163,6 +163,37 @@ describe("execute — Kontext-Budget", () => {
     expect(letzter[1]?.role).toBe("user");
   });
 
+  it("meldet Budget und Kuerzung als system-Ereignis, nicht als Agentenrede", async () => {
+    // Der ui-parser erkennt ein Ereignis nur am Feld `kind`. Fehlt es, landet
+    // die Zeile als `kind: "assistant"` im Transkript — es sieht dann so aus,
+    // als haette der Agent rohes JSON gesagt.
+    const ctx = makeCtx({ maxToolResultChars: 120_000, maxIterations: 6 });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(probeAntwort)
+      .mockImplementation(async (url: string) => {
+        if (String(url).includes("/api/v0/models/")) {
+          return { ok: true, json: async () => ({ loaded_context_length: 50_000 }) };
+        }
+        if (String(url).includes("/v1/chat/completions")) {
+          return shellAufruf(`c${fetchMock.mock.calls.length}`, 500_000);
+        }
+        return probeAntwort;
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await execute(ctx as any);
+
+    const ereignisse = (ctx.logs as string[])
+      .map((z) => { try { return JSON.parse(z); } catch { return null; } })
+      .filter((e) => e && typeof e === "object");
+    const budget = ereignisse.filter((e: any) =>
+      typeof e.text === "string" && /Kontext(fenster|budget)|gekürzt/i.test(e.text));
+    expect(budget.length).toBeGreaterThan(0);
+    for (const e of budget) expect(e.kind).toBe("system");
+    // Kein Ereignis darf ohne `kind` rausgehen.
+    for (const e of ereignisse) expect(typeof (e as any).kind).toBe("string");
+  });
+
   it("laeuft weiter, wenn das Fenster nicht ermittelbar ist", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(probeAntwort)
