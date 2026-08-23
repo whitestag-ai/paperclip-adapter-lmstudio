@@ -2,6 +2,35 @@
 
 All notable changes to this project are documented here. This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] - 2026-08-23
+
+### Added
+
+- **Context budget.** The message history no longer grows unbounded. Two
+  independent guards, both configurable:
+  - `maxToolResultChars` (default `40000`) caps a *single* tool result before
+    it enters the history. `shell_exec` could return up to 10 MB, `skill_read`
+    whole skill bodies, `paperclip_get_issue_context` the full API response —
+    all of it unbounded until now. The truncation is marked in the content so
+    the model can tell it from a genuinely short result.
+  - `maxPromptTokens` (default `0` = automatic) caps the *whole* prompt. On
+    `0` the adapter reads the model's currently loaded window from
+    `GET /api/v0/models/<id>` and budgets 80 % of it, so the cap follows the
+    machine a model is placed on instead of a hard-wired number. Oldest
+    assistant/tool exchanges are dropped first; the system prompt and the task
+    always survive, and tool messages are only ever dropped together with the
+    assistant message that called them (an orphan `tool_call_id` makes LM
+    Studio reject the whole request with a 400).
+
+  The window lookup is lazy — it only happens once the estimated prompt passes
+  32k tokens, so an ordinary short heartbeat costs no extra HTTP call.
+
+  Motivation: measured over one week, `Context size has been exceeded` killed
+  220 calls on `google/gemma-4-12b`, 120 on `gemma4-31b-it` and 97 on
+  `abiray/qwen3.6-35b-a3b`. Decisive: `gemma-4-31b-it-mlx` runs at 262144 —
+  the model maximum — and still failed 33 times. A larger window does not fix
+  this; the prompt has to get smaller.
+
 ## [1.2.0] - 2026-06-14
 
 ### Added

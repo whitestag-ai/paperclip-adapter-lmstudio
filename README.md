@@ -61,6 +61,8 @@ Restart the Paperclip server.
 | `timeoutMs` | number | `120000` | Full call timeout |
 | `streamingEnabled` | boolean | `true` | Token streaming |
 | `maxIterations` | number | `25` | Max tool calls per heartbeat |
+| `maxToolResultChars` | number | `40000` | Cap for a single tool result (0 = off) |
+| `maxPromptTokens` | number | `0` | Cap for the whole prompt; 0 = 80 % of the model's loaded window |
 
 ## Fallback endpoint
 

@@ -13,6 +13,14 @@ import { McpRegistry, type McpServerConfig } from "./mcp-client.js";
 import { executePaperclipTool, type PaperclipContext } from "./paperclip-tools.js";
 import { inferTerminalStatusFromFinalMessage } from "./guard-inference.js";
 import { loadDesiredSkills, renderSkillsIndex } from "./skills.js";
+import { fetchLoadedContextLength } from "./models.js";
+import {
+  capToolResult,
+  estimateMessagesTokens,
+  trimMessages,
+  DEFAULT_MAX_TOOL_RESULT_CHARS,
+  DEFAULT_PROMPT_BUDGET_RATIO,
+} from "./context-budget.js";
 
 interface ExecutionContext {
   runId: string;
@@ -315,6 +323,16 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
   // begrenzt es ("low"/"medium"/"high"). Leer = Modell entscheidet selbst.
   const reasoningEffort = asString(config.reasoningEffort, "");
   const maxIterations = asNumber(config.maxIterations, 25);
+  // Kontext-Budget. Siehe context-budget.ts: die Historie wuchs bisher
+  // unbegrenzt, bis LM Studio den Lauf mit "Context size has been exceeded"
+  // abbrach. Ein groesseres Fenster loest das nicht — gemessen scheitert
+  // selbst ein Modell auf 262144 (Modellmaximum).
+  const maxToolResultChars = asNumber(
+    config.maxToolResultChars,
+    DEFAULT_MAX_TOOL_RESULT_CHARS,
+  );
+  // 0 = automatisch aus dem geladenen Fenster des Modells ableiten.
+  const configuredPromptTokens = asNumber(config.maxPromptTokens, 0);
   const maxRunSeconds = asNumber(config.maxRunSeconds, asNumber(config.timeoutSec, 300));
   const runStart = Date.now();
   const runDeadlineMs = runStart + maxRunSeconds * 1000;
@@ -457,6 +475,60 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
     { role: "user", content: buildUserPrompt(ctx.context) },
   ];
 
+  // Unterhalb dieser Schaetzung wird gar nichts unternommen — kein
+  // Fenster-Lookup, keine Kuerzung. Der Wert liegt deutlich unter dem
+  // kleinsten Budget, das ueberhaupt herauskommen kann (98304 × 0,8 = 78.643),
+  // es kann also keine noetige Kuerzung verpasst werden. Der Nutzen: ein
+  // normaler kurzer Heartbeat kostet keinen zusaetzlichen HTTP-Aufruf.
+  const BUDGET_LOOKUP_THRESHOLD_TOKENS = 32_000;
+
+  let promptBudget = configuredPromptTokens > 0 ? configuredPromptTokens : 0;
+  let budgetLookupDone = configuredPromptTokens > 0;
+
+  /**
+   * Historie vor jedem Aufruf auf das Budget bringen.
+   *
+   * Das Budget wird **traege** ermittelt: erst wenn der Prompt gross genug
+   * ist, wird das geladene Fenster des Modells abgefragt. So folgt der Deckel
+   * automatisch der Maschine, auf der das Modell gerade liegt (RTX 98304 vs.
+   * MacBook 262144), ohne jeden Lauf mit einem Lookup zu belasten.
+   *
+   * Ergebnis wird in `messages` zurueckgeschrieben, damit die Kuerzung
+   * dauerhaft ist — sonst waechst die Liste zwischen zwei Aufrufen wieder auf
+   * den alten Stand und jede Iteration kuerzte dasselbe erneut.
+   */
+  async function enforceBudget(): Promise<void> {
+    if (estimateMessagesTokens(messages) < BUDGET_LOOKUP_THRESHOLD_TOKENS) return;
+    if (!budgetLookupDone) {
+      budgetLookupDone = true;
+      const geladen = await fetchLoadedContextLength(
+        currentEndpoint.url,
+        currentEndpoint.model,
+        probeTimeoutMs,
+      );
+      promptBudget = geladen ? Math.floor(geladen * DEFAULT_PROMPT_BUDGET_RATIO) : 0;
+      if (promptBudget > 0) {
+        await logEvent(ctx.onLog, {
+          type: "context_budget",
+          model: currentEndpoint.model,
+          loadedContextLength: geladen,
+          maxPromptTokens: promptBudget,
+        });
+      }
+    }
+    if (promptBudget <= 0) return;
+    const { messages: gekuerzt, dropped } = trimMessages(messages, promptBudget);
+    if (dropped === 0) return;
+    messages.length = 0;
+    messages.push(...(gekuerzt as ChatMessage[]));
+    await logEvent(ctx.onLog, {
+      type: "context_trimmed",
+      dropped,
+      maxPromptTokens: promptBudget,
+      estimatedTokens: estimateMessagesTokens(messages),
+    });
+  }
+
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
   let finalSummary = "";
@@ -513,6 +585,7 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
     }
 
     const iterationStart = Date.now();
+    await enforceBudget();
     let response;
     try {
       response = await callChatCompletion({
@@ -682,11 +755,15 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
         isError: result.isError,
       });
 
+      // Hier explodierte der Kontext: `shell_exec` liefert bis 10 MB,
+      // `skill_read` ganze Skill-Bodies, `paperclip_get_issue_context` die
+      // ungekuerzte API-Antwort — alles landete unbeschnitten in der Historie.
+      const toolContent = result.isError ? `Error: ${result.content}` : result.content;
       messages.push({
         role: "tool",
         tool_call_id: toolCall.id,
         name: toolCall.function.name,
-        content: result.isError ? `Error: ${result.content}` : result.content,
+        content: capToolResult(toolContent, maxToolResultChars),
       });
     }
   }

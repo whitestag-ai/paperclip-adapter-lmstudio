@@ -123,6 +123,20 @@ export function createServerAdapter(): ServerAdapterModule {
             hint: "Wallclock-Budget pro Run. Verhindert durchlaufende Tool-Schleifen, die LM Studio stundenlang belasten.",
           },
           {
+            key: "maxToolResultChars",
+            label: "Max Zeichen je Tool-Ergebnis",
+            type: "number" as const,
+            default: 40000,
+            hint: "Ein einzelnes Tool-Ergebnis wird darüber gekürzt (shell_exec liefert bis 10 MB). 0 = aus.",
+          },
+          {
+            key: "maxPromptTokens",
+            label: "Max Prompt-Token",
+            type: "number" as const,
+            default: 0,
+            hint: "Obergrenze für den gesamten Prompt. 0 = automatisch aus dem geladenen Kontextfenster des Modells (80 %). Ältere Tool-Austausche werden verworfen, bevor der Prompt das Fenster sprengt.",
+          },
+          {
             key: "allowedWriteRoots",
             label: "Zusätzlich erlaubte Schreib-Pfade",
             type: "text" as const,

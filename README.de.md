@@ -54,6 +54,8 @@ Paperclip-Server neu starten.
 | `timeoutMs` | number | `120000` | Voller Call-Timeout |
 | `streamingEnabled` | boolean | `true` | Token-Streaming |
 | `maxIterations` | number | `25` | Max. Tool-Aufrufe pro Heartbeat |
+| `maxToolResultChars` | number | `40000` | Obergrenze je einzelnem Tool-Ergebnis (0 = aus) |
+| `maxPromptTokens` | number | `0` | Obergrenze für den ganzen Prompt; 0 = 80 % des geladenen Fensters |
 
 ## Fallback-Endpoint
 
