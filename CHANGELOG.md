@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented here. This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.3.2] - 2026-08-25
+
+### Fixed
+
+- **The calibration arrived one call too late.** `calibrateFactor()` only
+  learns after a response, and the first call of a run is system prompt plus
+  task — prose, factor ~1.0. The JSON-heavy tool results arrive afterwards,
+  were still estimated at `chars/4`, and blew the window before the next
+  calibration could correct anything. Observed the morning of 25.08.: 68 budget
+  events, **not a single trim**, and 36 overflows on `gemma4-31b-it` in one hour.
+
+  The estimate is now density-aware by role: `tool` results and `tool_calls`
+  arguments count at `chars/2`, everything else at `chars/4`. Measured against
+  `gemma4-31b-it`: prose 4.18 chars/token, JSON 1.89, shell output 1.83 — so
+  `2` is deliberately a little conservative, and `calibrateFactor()` still
+  corrects whatever remains.
+
 ## [1.3.1] - 2026-08-25
 
 ### Fixed

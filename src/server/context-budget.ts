@@ -69,14 +69,37 @@ export function calibrateFactor(
   return Math.max(previous, 1, actual / estimated);
 }
 
-/** Grobe Schaetzung: ~4 Zeichen je Token — siehe calibrateFactor(). */
-export function estimateTokens(text: string | null | undefined): number {
+/**
+ * Zeichen je Token, nach Inhaltsart. Gemessen 25.08.2026 gegen `gemma4-31b-it`
+ * mit echten `usage.prompt_tokens`:
+ *   deutscher Fliesstext 4,18 · JSON 1,89 · Shell-Ausgabe 1,83
+ * Fuer die dichte Klasse wird bewusst 2 statt 1,83 genommen: knapp
+ * konservativ, den Rest holt `calibrateFactor()`.
+ */
+export const CHARS_PER_TOKEN_PROSE = 4;
+export const CHARS_PER_TOKEN_DENSE = 2;
+
+/** Grobe Schaetzung. `dense` fuer JSON/Shell — siehe die Konstanten oben. */
+export function estimateTokens(
+  text: string | null | undefined,
+  dense = false,
+): number {
   if (!text) return 0;
-  return Math.ceil(text.length / 4);
+  return Math.ceil(
+    text.length / (dense ? CHARS_PER_TOKEN_DENSE : CHARS_PER_TOKEN_PROSE));
 }
 
 /**
  * Token-Schaetzung fuer eine ganze Nachrichtenliste.
+ *
+ * ★ Die Dichte haengt an der ROLLE, nicht am Zufall: `tool`-Ergebnisse und
+ * `tool_calls`-Argumente sind JSON oder Shell-Ausgabe, Systemprompt und
+ * Aufgabe sind Prosa. Ohne diese Unterscheidung greift die Korrektur aus
+ * `calibrateFactor()` zu SPAET — sie wird erst nach einem Aufruf gelernt, und
+ * der erste Aufruf besteht nur aus Prosa (Faktor ~1,0). Die JSON-Lawine kommt
+ * danach und reisst das Fenster, bevor die naechste Kalibrierung greift.
+ * Genau daran lief der Deckel am 25.08. vormittags vorbei: 68 Budget-Meldungen,
+ * KEINE einzige Kuerzung — und trotzdem 36 Overflows in einer Stunde.
  *
  * `tool_calls` zaehlen mit: ein Aufruf mit grossem Argument-JSON (ein
  * geschriebener Dateiinhalt zum Beispiel) ist oft groesser als jeder
@@ -87,9 +110,10 @@ export function estimateMessagesTokens(messages: BudgetMessage[]): number {
   let sum = 0;
   for (const m of messages) {
     sum += 4; // Rollen- und Struktur-Overhead je Nachricht
-    sum += estimateTokens(m.content);
+    sum += estimateTokens(m.content, m.role === "tool");
     for (const tc of m.tool_calls ?? []) {
-      sum += estimateTokens(tc.function?.name) + estimateTokens(tc.function?.arguments);
+      sum += estimateTokens(tc.function?.name)
+           + estimateTokens(tc.function?.arguments, true);
     }
   }
   return sum;

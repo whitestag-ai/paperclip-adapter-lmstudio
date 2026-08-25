@@ -66,6 +66,38 @@ describe("estimateTokens", () => {
   });
 });
 
+describe("estimateMessagesTokens — Dichte je Rolle", () => {
+  // Der Fehler, den das behebt: der Korrekturfaktor wird erst NACH einem
+  // Aufruf gelernt, und der erste Aufruf enthaelt nur Systemprompt und
+  // Aufgabe — also Prosa, Faktor ~1,0. Die JSON-lastigen Tool-Ergebnisse
+  // kommen danach, werden mit chars/4 also um mehr als das Doppelte
+  // unterschaetzt, und der Overflow passiert VOR der naechsten Kalibrierung.
+  // Deshalb muss die Schaetzung die Dichte von vornherein kennen.
+  it("rechnet Tool-Ergebnisse dichter als Fliesstext", () => {
+    const prosa: BudgetMessage[] = [{ role: "user", content: "a".repeat(4000) }];
+    const tool: BudgetMessage[] = [
+      { role: "tool", tool_call_id: "c1", content: "a".repeat(4000) },
+    ];
+    expect(estimateMessagesTokens(tool)).toBeGreaterThan(
+      estimateMessagesTokens(prosa) * 1.8);
+  });
+
+  it("rechnet auch tool_call-Argumente dicht — dort steht JSON", () => {
+    const leer: BudgetMessage[] = [{ role: "assistant", content: "" }];
+    const mitArgs: BudgetMessage[] = [{
+      role: "assistant", content: "",
+      tool_calls: [{ id: "1", function: { name: "write_file", arguments: "j".repeat(4000) } }],
+    }];
+    expect(estimateMessagesTokens(mitArgs) - estimateMessagesTokens(leer))
+      .toBeGreaterThan(1800);
+  });
+
+  it("laesst Systemprompt und Aufgabe bei der Prosa-Dichte", () => {
+    const sys: BudgetMessage[] = [{ role: "system", content: "a".repeat(4000) }];
+    expect(estimateMessagesTokens(sys)).toBeLessThan(1100);
+  });
+});
+
 describe("calibrateFactor", () => {
   // Gemessen am 25.08.2026 gegen gemma4-31b-it: deutscher Fliesstext liegt bei
   // 4,18 Zeichen/Token (die chars/4-Schaetzung passt), JSON bei 1,89 und
