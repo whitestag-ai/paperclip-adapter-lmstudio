@@ -15,6 +15,7 @@ import { inferTerminalStatusFromFinalMessage } from "./guard-inference.js";
 import { loadDesiredSkills, renderSkillsIndex } from "./skills.js";
 import { fetchLoadedContextLength } from "./models.js";
 import {
+  calibrateFactor,
   capToolResult,
   estimateMessagesTokens,
   trimMessages,
@@ -484,6 +485,12 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
 
   let promptBudget = configuredPromptTokens > 0 ? configuredPromptTokens : 0;
   let budgetLookupDone = configuredPromptTokens > 0;
+  // Korrekturfaktor der Token-Schaetzung, kalibriert an usage.prompt_tokens.
+  // chars/4 passt fuer Prosa, unterschaetzt JSON und Shell-Ausgaben aber um
+  // ueber das Doppelte — und daraus besteht die Historie. Siehe
+  // context-budget.ts:calibrateFactor.
+  let tokenFactor = 1;
+  let lastSentEstimate = 0;
 
   /**
    * Historie vor jedem Aufruf auf das Budget bringen.
@@ -498,7 +505,8 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
    * den alten Stand und jede Iteration kuerzte dasselbe erneut.
    */
   async function enforceBudget(): Promise<void> {
-    if (estimateMessagesTokens(messages) < BUDGET_LOOKUP_THRESHOLD_TOKENS) return;
+    lastSentEstimate = estimateMessagesTokens(messages);
+    if (lastSentEstimate * tokenFactor < BUDGET_LOOKUP_THRESHOLD_TOKENS) return;
     if (!budgetLookupDone) {
       budgetLookupDone = true;
       const geladen = await fetchLoadedContextLength(
@@ -520,16 +528,19 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
       }
     }
     if (promptBudget <= 0) return;
-    const { messages: gekuerzt, dropped } = trimMessages(messages, promptBudget);
+    const { messages: gekuerzt, dropped } = trimMessages(
+      messages, promptBudget, tokenFactor);
     if (dropped === 0) return;
     messages.length = 0;
     messages.push(...(gekuerzt as ChatMessage[]));
+    lastSentEstimate = estimateMessagesTokens(messages);
     await logEvent(ctx.onLog, {
       kind: "system",
       text:
         `Kontext gekuerzt: ${dropped} aeltere Nachrichten entfernt, damit der ` +
-        `Prompt unter ${promptBudget} Token bleibt ` +
-        `(jetzt ~${estimateMessagesTokens(messages)}).`,
+        `Prompt unter ${promptBudget} Token bleibt (jetzt ~` +
+        `${Math.round(estimateMessagesTokens(messages) * tokenFactor)}, ` +
+        `Korrekturfaktor ${tokenFactor.toFixed(2)}).`,
     });
   }
 
@@ -647,6 +658,11 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
     if (response.usage) {
       totalInputTokens += response.usage.inputTokens;
       totalOutputTokens += response.usage.outputTokens;
+      // Die einzige verlaessliche Rueckmeldung, wie gross der Prompt WIRKLICH
+      // war. Ohne diese Kalibrierung deckelt der Adapter auf eine Zahl, die
+      // mit der Realitaet nur bei Prosa uebereinstimmt.
+      tokenFactor = calibrateFactor(
+        tokenFactor, lastSentEstimate, response.usage.inputTokens);
     }
 
     const msg = response.message;

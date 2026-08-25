@@ -194,6 +194,40 @@ describe("execute — Kontext-Budget", () => {
     for (const e of ereignisse) expect(typeof (e as any).kind).toBe("string");
   });
 
+  it("kalibriert an usage.prompt_tokens und kuerzt danach haerter", async () => {
+    // Der Fehler, den das behebt: chars/4 passt fuer Prosa, unterschaetzt JSON
+    // und Shell-Ausgaben aber um ueber das Doppelte (gemessen 1,89 bzw. 1,83
+    // Zeichen/Token). Ohne Kalibrierung meldet der Adapter "Budget eingehalten",
+    // waehrend LM Studio den Prompt als doppelt so gross sieht und abbricht.
+    const ctx = makeCtx({ maxToolResultChars: 120_000, maxIterations: 6 });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(probeAntwort)
+      .mockImplementation(async (url: string) => {
+        if (String(url).includes("/api/v0/models/")) {
+          return { ok: true, json: async () => ({ loaded_context_length: 50_000 }) };
+        }
+        if (String(url).includes("/v1/chat/completions")) {
+          const a = await shellAufruf(`c${fetchMock.mock.calls.length}`, 400_000).json();
+          // LM Studio meldet gut das Doppelte dessen, was chars/4 schaetzt.
+          a.usage = { prompt_tokens: 40_000, completion_tokens: 5 };
+          return { ok: true, json: async () => a };
+        }
+        return probeAntwort;
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await execute(ctx as any);
+
+    const meldungen = (ctx.logs as string[])
+      .map((z) => { try { return JSON.parse(z); } catch { return null; } })
+      .filter((e: any) => e && typeof e.text === "string" && e.text.includes("Korrekturfaktor"));
+    expect(meldungen.length).toBeGreaterThan(0);
+    const faktor = Number(
+      /Korrekturfaktor ([0-9.]+)/.exec((meldungen[0] as any).text)?.[1]);
+    // Muss ueber 1 liegen — sonst ist die Kalibrierung nicht angekommen.
+    expect(faktor).toBeGreaterThan(1);
+  });
+
   it("laeuft weiter, wenn das Fenster nicht ermittelbar ist", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(probeAntwort)

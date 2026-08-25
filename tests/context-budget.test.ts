@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  calibrateFactor,
   capToolResult,
   estimateTokens,
   estimateMessagesTokens,
@@ -65,6 +66,32 @@ describe("estimateTokens", () => {
   });
 });
 
+describe("calibrateFactor", () => {
+  // Gemessen am 25.08.2026 gegen gemma4-31b-it: deutscher Fliesstext liegt bei
+  // 4,18 Zeichen/Token (die chars/4-Schaetzung passt), JSON bei 1,89 und
+  // Shell-Ausgaben bei 1,83 — beides ueber 2x unterschaetzt. Genau daraus
+  // besteht die Historie, deshalb reichte der Deckel zunaechst nicht.
+  it("derives the correction from a real prompt_tokens reading", () => {
+    expect(calibrateFactor(1, 1800, 3815)).toBeCloseTo(2.12, 2);
+  });
+
+  it("never shrinks below 1 — under-trimming is the dangerous direction", () => {
+    expect(calibrateFactor(1, 850, 813)).toBe(1);
+  });
+
+  it("keeps the worst factor seen, it does not average it away", () => {
+    // Ein prosalastiger Aufruf darf die Korrektur eines JSON-lastigen nicht
+    // wieder aufheben — sonst kippt der naechste grosse Tool-Dump durch.
+    const nachJson = calibrateFactor(1, 1000, 2200);
+    expect(calibrateFactor(nachJson, 1000, 900)).toBeCloseTo(2.2, 2);
+  });
+
+  it("ignores unusable readings instead of poisoning the factor", () => {
+    expect(calibrateFactor(1.5, 0, 5000)).toBe(1.5);
+    expect(calibrateFactor(1.5, 1000, 0)).toBe(1.5);
+  });
+});
+
 describe("trimMessages", () => {
   // Realistic shape of a run: one system, one user, then assistant/tool pairs.
   function verlauf(paare: number, groesse = 4000): BudgetMessage[] {
@@ -100,6 +127,17 @@ describe("trimMessages", () => {
     const { messages, dropped } = trimMessages(msgs, 3000);
     expect(dropped).toBeGreaterThan(0);
     expect(estimateMessagesTokens(messages)).toBeLessThanOrEqual(3000);
+  });
+
+  it("trims harder once the factor says the estimate was optimistic", () => {
+    // Das ist der eigentliche Fix: mit Faktor 2,2 muss dieselbe Historie auf
+    // etwa die Haelfte des geschaetzten Budgets herunter, sonst reisst der
+    // reale Prompt das Fenster trotz "eingehaltenem" Budget.
+    const msgs = verlauf(10);
+    const ohne = trimMessages(msgs, 6000, 1);
+    const mit = trimMessages(msgs, 6000, 2.2);
+    expect(mit.dropped).toBeGreaterThan(ohne.dropped);
+    expect(estimateMessagesTokens(mit.messages) * 2.2).toBeLessThanOrEqual(6000);
   });
 
   it("never drops the system prompt or the task", () => {

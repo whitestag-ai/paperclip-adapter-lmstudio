@@ -2,6 +2,29 @@
 
 All notable changes to this project are documented here. This project follows [Semantic Versioning](https://semver.org/).
 
+## [1.3.1] - 2026-08-25
+
+### Fixed
+
+- **The token estimate was optimistic where it mattered most.** `chars/4` holds
+  for German prose (measured 4.18 chars/token against `gemma4-31b-it`) but
+  underestimates JSON by 2.12x (1.89 chars/token) and shell output by 2.18x
+  (1.83) — and tool results are almost never prose. A prompt capped at "78,643
+  tokens" was really past 160,000, so `Context size has been exceeded` kept
+  happening after 1.3.0 shipped: `gemma4-31b-it` went 99 (23.08.) -> 167
+  (24.08.).
+
+  The cap no longer guesses. `calibrateFactor()` derives a correction from
+  `usage.prompt_tokens`, which LM Studio returns after every call anyway, and
+  `trimMessages()` applies it. The factor keeps the worst ratio seen rather
+  than averaging — a prose-heavy call must not undo the correction learned from
+  a JSON-heavy one — and never drops below 1, because under-trimming is the
+  dangerous direction while over-trimming only costs history.
+
+- Budget events carried `type` instead of `kind`. The ui-parser keys on `kind`;
+  without it the line fell through to `{ kind: "assistant", text: <raw JSON> }`
+  and appeared in the transcript as if the agent had spoken JSON.
+
 ## [1.3.0] - 2026-08-23
 
 ### Added

@@ -42,7 +42,34 @@ export const DEFAULT_MAX_TOOL_RESULT_CHARS = 40_000;
  */
 export const DEFAULT_PROMPT_BUDGET_RATIO = 0.8;
 
-/** Grobe Schaetzung: ~4 Zeichen je Token. */
+/**
+ * Korrektur der Schaetzung an der Wirklichkeit.
+ *
+ * ★ Der Grund, warum es das braucht: die chars/4-Regel stimmt fuer deutschen
+ * Fliesstext (gemessen 4,18 Zeichen/Token gegen gemma4-31b-it), aber
+ * **JSON liegt bei 1,89 und Shell-Ausgaben bei 1,83** — beides ueber 2x
+ * unterschaetzt. Und genau daraus besteht die Historie: Tool-Ergebnisse sind
+ * fast nie Prosa. Ein auf 78.643 "Token" gedeckelter Prompt war real ueber
+ * 160.000 Token, weshalb die Overflows nach dem ersten Deckel weiterliefen.
+ *
+ * Statt eine bessere Heuristik zu raten, wird an `usage.prompt_tokens`
+ * kalibriert — die Zahl liefert LM Studio nach jedem Aufruf ohnehin mit.
+ *
+ * Bewusst das MAXIMUM statt eines Mittels: ein prosalastiger Aufruf darf die
+ * Korrektur eines JSON-lastigen nicht wieder aufheben, sonst kippt der
+ * naechste grosse Tool-Dump durch. Und nie unter 1 — zu wenig kuerzen ist die
+ * gefaehrliche Richtung, zu viel kuerzen kostet nur Historie.
+ */
+export function calibrateFactor(
+  previous: number,
+  estimated: number,
+  actual: number,
+): number {
+  if (!(estimated > 0) || !(actual > 0)) return previous;
+  return Math.max(previous, 1, actual / estimated);
+}
+
+/** Grobe Schaetzung: ~4 Zeichen je Token — siehe calibrateFactor(). */
 export function estimateTokens(text: string | null | undefined): number {
   if (!text) return 0;
   return Math.ceil(text.length / 4);
@@ -107,8 +134,11 @@ const TRIM_MARKER_PREFIX = "[Kontext gekürzt:";
 export function trimMessages(
   messages: BudgetMessage[],
   maxTokens: number,
+  factor = 1,
 ): { messages: BudgetMessage[]; dropped: number } {
-  if (maxTokens <= 0 || estimateMessagesTokens(messages) <= maxTokens) {
+  const f = factor > 0 ? factor : 1;
+  const kosten = (msgs: BudgetMessage[]) => estimateMessagesTokens(msgs) * f;
+  if (maxTokens <= 0 || kosten(messages) <= maxTokens) {
     return { messages, dropped: 0 };
   }
 
@@ -129,8 +159,7 @@ export function trimMessages(
 
   // Von vorn Gruppen fallen lassen, die juengste bleibt in jedem Fall.
   let ab = 0;
-  const passt = () =>
-    estimateMessagesTokens([...kopf, ...gruppen.slice(ab).flat()]) <= maxTokens;
+  const passt = () => kosten([...kopf, ...gruppen.slice(ab).flat()]) <= maxTokens;
   while (!passt() && ab < gruppen.length - 1) ab++;
   if (ab === 0) return { messages, dropped: 0 };
 
