@@ -7,6 +7,15 @@ import {
   probeEndpoint,
 } from "./llm-client.js";
 import { resolvePrimaryOrFallback, type Endpoint } from "./endpoint-resolver.js";
+import {
+  loadStore,
+  saveStore,
+  openBreaker,
+  closeBreaker,
+  breakerKey,
+  defaultBreakerStatePath,
+  type BreakerStore,
+} from "./breaker-state.js";
 import { dispatchTool } from "./tool-executor.js";
 import { PAPERCLIP_TOOLS, SKILL_READ_TOOL } from "./tools.js";
 import { McpRegistry, type McpServerConfig } from "./mcp-client.js";
@@ -319,6 +328,11 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
   // before falling back — accepted trade-off to avoid spurious failovers.
   const probeTimeoutMs = asNumber(config.probeTimeoutMs, 8000);
   const probeRetryBackoffMs = asNumber(config.probeRetryBackoffMs, 500);
+  // Wie lange ein Modell nach einem echten Fehlschlag ausgesetzt bleibt, bevor
+  // es erneut versucht wird. Deckt typische Lastphasen ab (z. B. ein Rendering
+  // auf derselben GPU), ohne den Primärpfad für einen ganzen Tag aufzugeben.
+  const breakerCooldownMs = asNumber(config.breakerCooldownMs, 60 * 60 * 1000);
+  const breakerStatePath = asString(config.breakerStatePath, defaultBreakerStatePath());
   const timeoutMs = asNumber(config.timeoutMs, 120000);
   // Optional: schaltet das Denken von Reasoning-Modellen ab ("none") oder
   // begrenzt es ("low"/"medium"/"high"). Leer = Modell entscheidet selbst.
@@ -378,6 +392,26 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
     companyId: ctx.agent.companyId,
   };
 
+  // Breaker-Zustand aus vorherigen Heartbeats. Der Adapter läuft je Run als
+  // eigener Prozess — ohne Datei liefe jeder Run erneut in ein Modell, das
+  // bereits als überlastet bekannt ist.
+  const primaryKey = breakerKey(primaryUrl, primaryModel);
+  let breakerStore: BreakerStore = await loadStore(breakerStatePath);
+
+  async function persistBreaker(next: BreakerStore): Promise<void> {
+    breakerStore = next;
+    try {
+      await saveStore(breakerStatePath, next);
+    } catch (err) {
+      // Ein nicht schreibbarer Zustand darf den Run nicht kippen — er kostet
+      // höchstens einen vergeblichen Versuch im nächsten Heartbeat.
+      await logEvent(ctx.onLog, {
+        kind: "system",
+        text: `Breaker-Zustand nicht speicherbar (${breakerStatePath}): ${String(err)}`,
+      });
+    }
+  }
+
   // Probe + Fallback-Entscheidung für diesen Heartbeat
   const resolve = await resolvePrimaryOrFallback({
     primaryUrl,
@@ -386,7 +420,16 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
     fallbackModel,
     probeTimeoutMs,
     retryBackoffMs: probeRetryBackoffMs,
+    breaker: { store: breakerStore, now: Date.now(), cooldownMs: breakerCooldownMs },
   });
+
+  if (resolve.ok && resolve.primaryRecovered) {
+    await logEvent(ctx.onLog, {
+      kind: "system",
+      text: `✅ Primary LLM wieder erreichbar (${primaryUrl} / ${primaryModel}) — Breaker geschlossen.`,
+    });
+    await persistBreaker(closeBreaker(breakerStore, primaryKey));
+  }
 
   if (!resolve.ok) {
     return {
@@ -431,12 +474,20 @@ export async function execute(ctx: ExecutionContext): Promise<ExecutionResult> {
     currentEndpoint = { url: fallbackUrl, model: fallbackModel || primaryModel };
     onFallback = true;
 
+    // Das war ein echter Fehlschlag, kein blosser Probe-Verdacht: Modell für
+    // die Cooldown-Dauer aussetzen, damit die folgenden Heartbeats es nicht
+    // erneut anfassen und das ohnehin ausgelastete Gerät weiter belasten.
+    await persistBreaker(
+      openBreaker(breakerStore, primaryKey, `${err.kind} — ${err.message}`, Date.now()),
+    );
+
     await logEvent(ctx.onLog, {
       kind: "system",
       text:
         `⚠️ Primary LLM Fehler während ${context} (${primaryUrl}).\n` +
         `Fallback aktiv: ${currentEndpoint.url} / ${currentEndpoint.model}\n` +
-        `Grund: ${err.kind} — ${err.message}`,
+        `Grund: ${err.kind} — ${err.message}\n` +
+        `Primary ausgesetzt für ${Math.round(breakerCooldownMs / 60000)} min.`,
     });
 
     return true;
