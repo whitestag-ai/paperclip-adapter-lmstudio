@@ -53,6 +53,7 @@
     "vitest": "^3.0.0"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0"
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "undici": "6.23.0"
   }
 }

@@ -1,3 +1,28 @@
+import { Agent } from "undici";
+
+/**
+ * Verbindungs-Dispatcher fuer LLM-Aufrufe, dessen Header- und Body-Grenze
+ * `timeoutMs` folgt.
+ *
+ * Nodes eingebautes fetch bricht nach 300 s ohne Antwort-Header mit
+ * "fetch failed" ab — unabhaengig von AbortSignal.timeout. Bei nicht
+ * gestreamten Aufrufen kommen die Header aber erst mit der fertigen Antwort,
+ * und gemma-4-31b denkt bei grossem Kontext und belegter Warteschlange
+ * laenger als fuenf Minuten. Am 12.10.2026 riss das 34 Laeufe ab, obwohl
+ * timeoutMs 30 min erlaubte (Anfrage 17:05:10, Abbruch 17:10:11).
+ *
+ * Ein Dispatcher je Grenze, damit Verbindungen wiederverwendet werden.
+ */
+const dispatchers = new Map<number, Agent>();
+export function llmDispatcher(timeoutMs: number): Agent {
+  let d = dispatchers.get(timeoutMs);
+  if (!d) {
+    d = new Agent({ headersTimeout: timeoutMs, bodyTimeout: timeoutMs });
+    dispatchers.set(timeoutMs, d);
+  }
+  return d;
+}
+
 export interface ToolCallInResponse {
   id: string;
   type: "function";
@@ -134,7 +159,8 @@ export async function callChatCompletion(req: CompletionRequest): Promise<Comple
         ...(req.reasoningEffort ? { reasoning_effort: req.reasoningEffort } : {}),
       }),
       signal: AbortSignal.timeout(req.timeoutMs),
-    });
+      dispatcher: llmDispatcher(req.timeoutMs),
+    } as RequestInit);
   } catch (err) {
     throw classifyFetchError(err);
   }
@@ -186,7 +212,8 @@ export async function streamChatCompletion(req: StreamRequest): Promise<string> 
         ...(req.reasoningEffort ? { reasoning_effort: req.reasoningEffort } : {}),
       }),
       signal: AbortSignal.timeout(req.timeoutMs),
-    });
+      dispatcher: llmDispatcher(req.timeoutMs),
+    } as RequestInit);
   } catch (err) {
     throw classifyFetchError(err);
   }
